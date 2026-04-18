@@ -9,6 +9,8 @@ Default out-of-box profile is `antigravity`, but you can add any resource set.
 - Supports per-resource policy:
   - `required_country`
   - `required_server` (substring match against VPN egress IP / org / ISP / domain)
+  - `allowed_countries` (ISO code allow-list)
+  - `blocked_countries` (ISO code deny-list)
 - If policy mismatch happens, resource is hard-blocked on all interfaces.
 - Works with any VPN provider because enforcement is interface-based (`tun`, `wg`, etc.).
 - Includes both CLI and web GUI.
@@ -38,7 +40,9 @@ sudo python3 vrks.py resource-add \
   --name youtube \
   --domain youtube.com \
   --domain ytimg.com \
-  --country US \
+  --allow-country US \
+  --allow-country DE \
+  --block-country RU \
   --server m247
 
 sudo python3 vrks.py apply
@@ -66,13 +70,25 @@ Stored at `/etc/vpn-resource-killswitch/config.json`:
       "domains": ["mrdoob.com", "elgoog.im"],
       "policy": {
         "required_country": null,
-        "required_server": null
+        "required_server": null,
+        "allowed_countries": [],
+        "blocked_countries": ["RU", "CU", "IR", "KP"]
       },
       "enabled": true
     }
   ]
 }
 ```
+
+## Google Restrictions Baseline
+
+For country-level Google embargo logic, use:
+
+- `CU` (Cuba)
+- `IR` (Iran)
+- `KP` (North Korea)
+
+Region-level Google restrictions (Crimea, DNR, LNR) are not representable via plain country code and need region-aware geodata.
 
 ## Tests
 

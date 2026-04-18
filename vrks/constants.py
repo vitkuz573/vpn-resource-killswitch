@@ -24,6 +24,10 @@ TIMER_PATH = Path("/etc/systemd/system") / TIMER_NAME
 
 DEFAULT_PROFILE_NAME = "antigravity"
 DEFAULT_PROFILE_DOMAINS = ("mrdoob.com", "elgoog.im")
+# Country-level Google embargo baseline from Google Ads help center (2026-04):
+# Cuba, Iran, North Korea. Region-only restrictions (Crimea, DNR, LNR) are handled by region,
+# and cannot be reliably detected from country_code-only geolocation APIs.
+GOOGLE_OFAC_COUNTRY_CODES = ("CU", "IR", "KP")
 
 GEO_LOOKUP_URL = "https://ipwho.is/"
 

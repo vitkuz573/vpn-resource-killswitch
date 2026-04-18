@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 class ResourcePolicy:
     required_country: str | None = None
     required_server: str | None = None
+    allowed_countries: list[str] | None = None
+    blocked_countries: list[str] | None = None
 
 
 @dataclass

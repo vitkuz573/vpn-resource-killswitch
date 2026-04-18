@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 from typing import Iterable
 
@@ -8,6 +9,8 @@ from .constants import GEO_LOOKUP_URL, IFNAME_RE, RESOURCE_RE
 from .errors import CLIError
 from .models import ProbeResult, VpnContext
 from .system import run
+
+COUNTRY_CODE_RE = re.compile(r"^[A-Za-z]{2}$")
 
 
 def normalize_domain(domain: str) -> str:
@@ -35,6 +38,19 @@ def normalize_resource_name(name: str) -> str:
             "Invalid resource name. Use lowercase letters/numbers/underscore/hyphen, 2-64 chars."
         )
     return value
+
+
+def normalize_country_code(code: str) -> str:
+    value = code.strip().upper()
+    if not COUNTRY_CODE_RE.match(value):
+        raise CLIError(f"Invalid country code: {code!r}. Use ISO 3166-1 alpha-2 like RU/US/DE.")
+    return value
+
+
+def normalize_country_codes(codes: Iterable[str] | None) -> list[str]:
+    if not codes:
+        return []
+    return sorted({normalize_country_code(code) for code in codes})
 
 
 def validate_ifname(ifname: str) -> str:

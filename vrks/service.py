@@ -25,6 +25,7 @@ from .network import (
     detect_vpn_context,
     detect_vpn_interface,
     interface_is_up,
+    normalize_country_codes,
     normalize_domain,
     normalize_domains,
     normalize_resource_name,
@@ -41,17 +42,38 @@ def _sorted_ips(values: set[str]) -> list[str]:
 
 
 def _has_policy(policy: ResourcePolicy) -> bool:
-    return bool((policy.required_country or "").strip() or (policy.required_server or "").strip())
+    return bool(
+        (policy.required_country or "").strip()
+        or (policy.required_server or "").strip()
+        or normalize_country_codes(policy.allowed_countries)
+        or normalize_country_codes(policy.blocked_countries)
+    )
 
 
 def _policy_match(policy: ResourcePolicy, context: VpnContext | None) -> tuple[bool, str]:
     need_country = (policy.required_country or "").strip()
     need_server = (policy.required_server or "").strip()
-    if not need_country and not need_server:
+    allowed_countries = normalize_country_codes(policy.allowed_countries)
+    blocked_countries = normalize_country_codes(policy.blocked_countries)
+    if not need_country and not need_server and not allowed_countries and not blocked_countries:
         return True, "no_policy_constraints"
 
     if context is None:
         return False, "vpn_context_unavailable"
+
+    current_country_code = (context.country_code or "").strip().upper()
+
+    if blocked_countries:
+        if not current_country_code:
+            return False, "country_code_unavailable_for_blocked_policy"
+        if current_country_code in set(blocked_countries):
+            return False, f"country_blocked(current={current_country_code})"
+
+    if allowed_countries:
+        if not current_country_code:
+            return False, "country_code_unavailable_for_allowed_policy"
+        if current_country_code not in set(allowed_countries):
+            return False, f"country_not_allowed(current={current_country_code})"
 
     if need_country:
         expected = need_country.lower()
@@ -95,6 +117,8 @@ class KillSwitchService:
         domains: list[str] | None,
         required_country: str | None,
         required_server: str | None,
+        allowed_countries: list[str] | None,
+        blocked_countries: list[str] | None,
         install_bin: bool,
     ) -> dict[str, Any]:
         ensure_root()
@@ -110,6 +134,8 @@ class KillSwitchService:
             policy=ResourcePolicy(
                 required_country=(required_country or None),
                 required_server=(required_server or None),
+                allowed_countries=normalize_country_codes(allowed_countries),
+                blocked_countries=normalize_country_codes(blocked_countries),
             ),
         )
         config = AppConfig(version=CONFIG_VERSION, vpn_interface=vpn_if, resources=[initial])
@@ -181,6 +207,8 @@ class KillSwitchService:
                 "policy": {
                     "required_country": resource.policy.required_country,
                     "required_server": resource.policy.required_server,
+                    "allowed_countries": normalize_country_codes(resource.policy.allowed_countries),
+                    "blocked_countries": normalize_country_codes(resource.policy.blocked_countries),
                 },
                 "mode": mode,
                 "reason": reason,
@@ -249,6 +277,8 @@ class KillSwitchService:
         domains: list[str],
         required_country: str | None,
         required_server: str | None,
+        allowed_countries: list[str] | None,
+        blocked_countries: list[str] | None,
         replace: bool,
     ) -> AppConfig:
         ensure_root()
@@ -261,6 +291,8 @@ class KillSwitchService:
             policy=ResourcePolicy(
                 required_country=(required_country or None),
                 required_server=(required_server or None),
+                allowed_countries=normalize_country_codes(allowed_countries),
+                blocked_countries=normalize_country_codes(blocked_countries),
             ),
         )
 
@@ -303,6 +335,8 @@ class KillSwitchService:
                     "policy": {
                         "required_country": resource.policy.required_country,
                         "required_server": resource.policy.required_server,
+                        "allowed_countries": normalize_country_codes(resource.policy.allowed_countries),
+                        "blocked_countries": normalize_country_codes(resource.policy.blocked_countries),
                     },
                 }
             )

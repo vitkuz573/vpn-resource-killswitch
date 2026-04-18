@@ -121,6 +121,10 @@ PAGE_HTML = """<!doctype html>
       <input id="country" placeholder="US">
       <label>Required Server/IP/ISP match (optional)</label>
       <input id="server" placeholder="198.51.100.4 or m247">
+      <label>Allowed Country Codes (optional, comma-separated)</label>
+      <input id="allowCountries" placeholder="US,DE,FR">
+      <label>Blocked Country Codes (optional, comma-separated)</label>
+      <input id="blockCountries" placeholder="RU,IR,KP">
       <div class="row">
         <button onclick="addResource(false)">Add</button>
         <button class="alt" onclick="addResource(true)">Replace</button>
@@ -173,7 +177,9 @@ PAGE_HTML = """<!doctype html>
           '<span class="pill">' + item.name + '</span>',
           '<span class="pill">domains: ' + item.domains.length + '</span>',
           policy.required_country ? '<span class="pill">country=' + policy.required_country + '</span>' : '',
-          policy.required_server ? '<span class="pill">server~=' + policy.required_server + '</span>' : ''
+          policy.required_server ? '<span class="pill">server~=' + policy.required_server + '</span>' : '',
+          (policy.allowed_countries || []).length ? '<span class="pill">allow=' + policy.allowed_countries.join('/') + '</span>' : '',
+          (policy.blocked_countries || []).length ? '<span class="pill">block=' + policy.blocked_countries.join('/') + '</span>' : ''
         ].join('');
         return '<div style="margin-bottom:12px;">'
           + badges
@@ -214,11 +220,21 @@ PAGE_HTML = """<!doctype html>
     }
 
     async function addResource(replace) {
+      const allowCountries = document.getElementById('allowCountries').value
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean);
+      const blockCountries = document.getElementById('blockCountries').value
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean);
       const payload = {
         name: document.getElementById('name').value.trim(),
         domains: document.getElementById('domains').value.split(/\\n+/).map(x => x.trim()).filter(Boolean),
         required_country: document.getElementById('country').value.trim() || null,
         required_server: document.getElementById('server').value.trim() || null,
+        allowed_countries: allowCountries,
+        blocked_countries: blockCountries,
         replace
       };
       try {
@@ -257,6 +273,8 @@ def _serialize_config(config: AppConfig) -> dict[str, Any]:
                 "policy": {
                     "required_country": resource.policy.required_country,
                     "required_server": resource.policy.required_server,
+                    "allowed_countries": resource.policy.allowed_countries or [],
+                    "blocked_countries": resource.policy.blocked_countries or [],
                 },
             }
             for resource in config.resources
@@ -333,6 +351,8 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         domains=[str(x) for x in data["domains"]],
                         required_country=data.get("required_country"),
                         required_server=data.get("required_server"),
+                        allowed_countries=[str(x) for x in (data.get("allowed_countries") or [])],
+                        blocked_countries=[str(x) for x in (data.get("blocked_countries") or [])],
                         replace=bool(data.get("replace", False)),
                     )
                     _json_response(self, {"ok": True})

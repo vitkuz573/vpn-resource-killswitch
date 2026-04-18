@@ -8,6 +8,7 @@ from typing import Any
 from .constants import CONFIG_PATH, CONFIG_VERSION, DEFAULT_PROFILE_NAME, STATE_PATH
 from .errors import CLIError
 from .models import AppConfig, ResourcePolicy, ResourceProfile, VpnContext
+from .network import normalize_country_codes
 
 
 def _resource_from_dict(raw: dict[str, Any]) -> ResourceProfile:
@@ -15,6 +16,8 @@ def _resource_from_dict(raw: dict[str, Any]) -> ResourceProfile:
     policy = ResourcePolicy(
         required_country=policy_raw.get("required_country"),
         required_server=policy_raw.get("required_server"),
+        allowed_countries=normalize_country_codes(policy_raw.get("allowed_countries")),
+        blocked_countries=normalize_country_codes(policy_raw.get("blocked_countries")),
     )
     return ResourceProfile(
         name=str(raw["name"]),

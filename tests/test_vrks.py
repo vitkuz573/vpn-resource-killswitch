@@ -63,6 +63,27 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("country_mismatch", reason)
 
+    def test_policy_blocks_country_from_blocklist(self) -> None:
+        policy = ResourcePolicy(blocked_countries=["RU", "IR", "KP"])
+        context = VpnContext(country="Russia", country_code="RU")
+        allowed, reason = _policy_match(policy, context)
+        self.assertFalse(allowed)
+        self.assertIn("country_blocked", reason)
+
+    def test_policy_blocks_country_not_in_allowlist(self) -> None:
+        policy = ResourcePolicy(allowed_countries=["US", "DE"])
+        context = VpnContext(country="France", country_code="FR")
+        allowed, reason = _policy_match(policy, context)
+        self.assertFalse(allowed)
+        self.assertIn("country_not_allowed", reason)
+
+    def test_policy_allows_country_in_allowlist(self) -> None:
+        policy = ResourcePolicy(allowed_countries=["US", "DE"])
+        context = VpnContext(country="Germany", country_code="DE")
+        allowed, reason = _policy_match(policy, context)
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "policy_match")
+
 
 if __name__ == "__main__":
     unittest.main()

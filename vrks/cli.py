@@ -46,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
     setup_p.add_argument("--country", help="Required country for antigravity profile.")
     setup_p.add_argument("--server", help="Required server/IP/ISP pattern for antigravity profile.")
     setup_p.add_argument(
+        "--allow-country",
+        action="append",
+        help="Allow only listed ISO country codes for antigravity profile (repeat option).",
+    )
+    setup_p.add_argument(
+        "--block-country",
+        action="append",
+        help="Block listed ISO country codes for antigravity profile (repeat option).",
+    )
+    setup_p.add_argument(
         "--no-install-bin",
         dest="install_bin",
         action="store_false",
@@ -76,6 +86,16 @@ def build_parser() -> argparse.ArgumentParser:
     add_p.add_argument("--domain", action="append", required=True, help="Domain (repeat for many).")
     add_p.add_argument("--country", help="Required country for this resource.")
     add_p.add_argument("--server", help="Required server/IP/ISP match for this resource.")
+    add_p.add_argument(
+        "--allow-country",
+        action="append",
+        help="Allow only listed ISO country codes for this resource (repeat option).",
+    )
+    add_p.add_argument(
+        "--block-country",
+        action="append",
+        help="Block listed ISO country codes for this resource (repeat option).",
+    )
     add_p.add_argument("--replace", action="store_true", help="Replace if profile exists.")
 
     rm_p = sub.add_parser("resource-remove", help="Remove resource profile.")
@@ -109,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
                 domains=args.domain,
                 required_country=args.country,
                 required_server=args.server,
+                allowed_countries=args.allow_country,
+                blocked_countries=args.block_country,
                 install_bin=args.install_bin,
             )
             cfg = result["config"]
@@ -157,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
                                 "policy": {
                                     "required_country": r.policy.required_country,
                                     "required_server": r.policy.required_server,
+                                    "allowed_countries": r.policy.allowed_countries or [],
+                                    "blocked_countries": r.policy.blocked_countries or [],
                                 },
                             }
                             for r in status["config"].resources
@@ -179,7 +203,9 @@ def main(argv: list[str] | None = None) -> int:
                     print(
                         f"  - {resource.name}: domains={len(resource.domains)} "
                         f"country={resource.policy.required_country or '-'} "
-                        f"server={resource.policy.required_server or '-'}"
+                        f"server={resource.policy.required_server or '-'} "
+                        f"allow={','.join(resource.policy.allowed_countries or []) or '-'} "
+                        f"block={','.join(resource.policy.blocked_countries or []) or '-'}"
                     )
                 if status["state"] and status["state"].get("updated_at"):
                     print(f"Last apply: {status['state']['updated_at']}")
@@ -201,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
                 domains=args.domain,
                 required_country=args.country,
                 required_server=args.server,
+                allowed_countries=args.allow_country,
+                blocked_countries=args.block_country,
                 replace=args.replace,
             )
             print(f"Resource saved. Total resources: {len(cfg.resources)}")
@@ -221,7 +249,9 @@ def main(argv: list[str] | None = None) -> int:
                     print(
                         f"{resource['name']}: {', '.join(resource['domains'])} "
                         f"[country={policy['required_country'] or '-'}, "
-                        f"server={policy['required_server'] or '-'}]"
+                        f"server={policy['required_server'] or '-'}, "
+                        f"allow={','.join(policy.get('allowed_countries') or []) or '-'}, "
+                        f"block={','.join(policy.get('blocked_countries') or []) or '-'}]"
                     )
             return 0
 
@@ -247,4 +277,3 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return 130
-
