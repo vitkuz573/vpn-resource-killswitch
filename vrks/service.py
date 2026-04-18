@@ -12,7 +12,6 @@ from . import storage
 from .constants import (
     BIN_PATH,
     CONFIG_VERSION,
-    DEFAULT_PROFILE_DOMAINS,
     DEFAULT_PROFILE_NAME,
     RUNTIME_ROOT,
     SERVICE_PATH,
@@ -38,6 +37,7 @@ from .network import (
     resolve_domains,
     validate_ifname,
 )
+from .presets import get_preset, list_presets
 from .runtime import (
     disable_timer,
     enable_timer,
@@ -154,6 +154,7 @@ class KillSwitchService:
         self,
         *,
         vpn_interface: str | None,
+        resource_name: str | None,
         domains: list[str] | None,
         required_country: str | None,
         required_server: str | None,
@@ -167,11 +168,16 @@ class KillSwitchService:
         if not detected_if:
             raise CLIError("Cannot auto-detect VPN interface. Set --vpn-interface.")
         vpn_if = validate_ifname(detected_if)
-
-        antigravity_domains = normalize_domains(domains or list(DEFAULT_PROFILE_DOMAINS))
+        if not domains:
+            raise CLIError(
+                "Setup requires at least one domain. "
+                "Use --domain multiple times, or use bootstrap with a preset."
+            )
+        initial_domains = normalize_domains(domains)
+        initial_name = normalize_resource_name(resource_name or DEFAULT_PROFILE_NAME)
         initial = ResourceProfile(
-            name=DEFAULT_PROFILE_NAME,
-            domains=antigravity_domains,
+            name=initial_name,
+            domains=initial_domains,
             policy=ResourcePolicy(
                 required_country=(required_country or None),
                 required_server=(required_server or None),
@@ -194,6 +200,78 @@ class KillSwitchService:
 
         report = self.apply(config=config)
         return {"config": config, "report": report}
+
+    def bootstrap(
+        self,
+        *,
+        preset_name: str,
+        vpn_interface: str | None,
+        install_bin: bool,
+        timeout: int,
+    ) -> dict[str, Any]:
+        ensure_root()
+        preset = get_preset(preset_name)
+        configured = False
+        try:
+            storage.load_config()
+            configured = True
+        except CLIError:
+            configured = False
+
+        if not configured:
+            self.setup(
+                vpn_interface=vpn_interface,
+                resource_name=preset.name,
+                domains=preset.domains,
+                required_country=preset.policy.get("required_country"),
+                required_server=preset.policy.get("required_server"),
+                allowed_countries=preset.policy.get("allowed_countries"),
+                blocked_countries=preset.policy.get("blocked_countries"),
+                blocked_context_keywords=preset.policy.get("blocked_context_keywords"),
+                install_bin=install_bin,
+            )
+        else:
+            self.apply_preset(name=preset_name, replace=True, run_apply=True)
+        verify = self.verify(resources=[preset_name], timeout=timeout)
+        return {"preset": preset_name, "verify": verify}
+
+    def list_presets(self) -> list[dict[str, Any]]:
+        result = []
+        for preset in list_presets():
+            result.append(
+                {
+                    "name": preset.name,
+                    "description": preset.description,
+                    "domains": preset.domains,
+                    "policy": preset.policy,
+                }
+            )
+        return result
+
+    def apply_preset(self, *, name: str, replace: bool, run_apply: bool) -> dict[str, Any]:
+        ensure_root()
+        preset = get_preset(name)
+        self.add_resource(
+            name=preset.name,
+            domains=preset.domains,
+            required_country=preset.policy.get("required_country"),
+            required_server=preset.policy.get("required_server"),
+            allowed_countries=preset.policy.get("allowed_countries"),
+            blocked_countries=preset.policy.get("blocked_countries"),
+            blocked_context_keywords=preset.policy.get("blocked_context_keywords"),
+            replace=replace,
+        )
+        apply_report = self.apply() if run_apply else None
+        return {
+            "preset": {
+                "name": preset.name,
+                "description": preset.description,
+                "domains": preset.domains,
+                "policy": preset.policy,
+            },
+            "applied": run_apply,
+            "apply_report": apply_report,
+        }
 
     def apply(self, config: AppConfig | None = None) -> dict[str, Any]:
         ensure_root()
@@ -458,6 +536,36 @@ class KillSwitchService:
                 "blocked": non_vpn_blocked,
             },
             "passed": passed,
+        }
+
+    def access_check(
+        self,
+        *,
+        resource_name: str,
+        domain: str | None,
+        timeout: int,
+    ) -> dict[str, Any]:
+        probe = self.probe(
+            resource_name=resource_name,
+            domain=domain,
+            non_vpn_interface=None,
+            timeout=timeout,
+        )
+        expected_mode = probe["expected_mode"]
+        vpn_reachable = bool(probe["vpn_result"]["reachable"])
+        non_vpn_blocked = bool(probe["non_vpn_result"]["blocked"])
+        if expected_mode == "hard_block":
+            access_ok = (not vpn_reachable) and non_vpn_blocked
+        else:
+            access_ok = vpn_reachable and non_vpn_blocked
+        return {
+            "resource": probe["resource"],
+            "domain": probe["url"],
+            "expected_mode": expected_mode,
+            "vpn_reachable": vpn_reachable,
+            "non_vpn_blocked": non_vpn_blocked,
+            "access_ok": access_ok,
+            "probe": probe,
         }
 
     def verify(self, *, resources: list[str] | None, timeout: int) -> dict[str, Any]:

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "name": "antigravity",
+      "description": "Google Anti-Gravity profile with recommended anti-ban policy.",
+      "domains": [
+        "elgoog.im",
+        "www.elgoog.im",
+        "mrdoob.com",
+        "www.mrdoob.com"
+      ],
+      "policy": {
+        "allowed_countries": [],
+        "blocked_countries": ["RU", "CU", "IR", "KP"],
+        "blocked_context_keywords": [
+          "crimea",
+          "sevastopol",
+          "donetsk",
+          "luhansk",
+          "dnr",
+          "lnr"
+        ]
+      }
+    }
+  ]
+}

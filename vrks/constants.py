@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "vpn-resource-killswitch"
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 CONFIG_DIR = Path("/etc/vpn-resource-killswitch")
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -25,8 +25,7 @@ TIMER_PATH = Path("/etc/systemd/system") / TIMER_NAME
 WATCH_SERVICE_NAME = "vpn-resource-killswitch-watch.service"
 WATCH_SERVICE_PATH = Path("/etc/systemd/system") / WATCH_SERVICE_NAME
 
-DEFAULT_PROFILE_NAME = "antigravity"
-DEFAULT_PROFILE_DOMAINS = ("mrdoob.com", "elgoog.im")
+DEFAULT_PROFILE_NAME = "default"
 # Country-level Google embargo baseline from Google Ads help center (2026-04):
 # Cuba, Iran, North Korea. Region-only restrictions (Crimea, DNR, LNR) are handled by region,
 # and cannot be reliably detected from country_code-only geolocation APIs.

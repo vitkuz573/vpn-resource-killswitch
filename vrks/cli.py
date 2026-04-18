@@ -36,29 +36,30 @@ def _print_probe(report: dict) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vrks",
-        description="VPN Resource Kill-Switch (generic resources, default antigravity profile).",
+        description="VPN Resource Kill-Switch (generic resources with preset support).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    setup_p = sub.add_parser("setup", help="Install and initialize config with antigravity profile.")
+    setup_p = sub.add_parser("setup", help="Install and initialize generic config.")
     setup_p.add_argument("--vpn-interface", help="VPN interface (auto-detected if omitted).")
-    setup_p.add_argument("--domain", action="append", help="Antigravity domains for initial profile.")
-    setup_p.add_argument("--country", help="Required country for antigravity profile.")
-    setup_p.add_argument("--server", help="Required server/IP/ISP pattern for antigravity profile.")
+    setup_p.add_argument("--name", help="Initial resource profile name (default: default).")
+    setup_p.add_argument("--domain", action="append", help="Initial profile domains (repeat option).")
+    setup_p.add_argument("--country", help="Required country for initial profile.")
+    setup_p.add_argument("--server", help="Required server/IP/ISP pattern for initial profile.")
     setup_p.add_argument(
         "--allow-country",
         action="append",
-        help="Allow only listed ISO country codes for antigravity profile (repeat option).",
+        help="Allow only listed ISO country codes for initial profile (repeat option).",
     )
     setup_p.add_argument(
         "--block-country",
         action="append",
-        help="Block listed ISO country codes for antigravity profile (repeat option).",
+        help="Block listed ISO country codes for initial profile (repeat option).",
     )
     setup_p.add_argument(
         "--block-context",
         action="append",
-        help="Block by VPN context keyword (country/region/city/org/isp/domain), repeat option.",
+        help="Block by VPN context keyword (country/region/city/org/isp/domain/ip), repeat option.",
     )
     setup_p.add_argument(
         "--no-install-bin",
@@ -75,16 +76,50 @@ def build_parser() -> argparse.ArgumentParser:
     setup_p.add_argument("--timeout", type=int, default=8, help="Probe timeout in seconds.")
     setup_p.set_defaults(install_bin=True, self_test=True)
 
+    bootstrap_p = sub.add_parser(
+        "bootstrap",
+        help="One-command start: setup(if needed) + preset apply + verify.",
+    )
+    bootstrap_p.add_argument("--preset", required=True, help="Preset name.")
+    bootstrap_p.add_argument("--vpn-interface", help="VPN interface (auto-detected if omitted).")
+    bootstrap_p.add_argument(
+        "--no-install-bin",
+        dest="install_bin",
+        action="store_false",
+        help="Do not install /usr/local/bin/vrks runtime on first setup.",
+    )
+    bootstrap_p.add_argument("--timeout", type=int, default=8, help="Verify probe timeout in seconds.")
+    bootstrap_p.set_defaults(install_bin=True)
+
     apply_p = sub.add_parser("apply", help="Refresh nftables rules from current config.")
 
     status_p = sub.add_parser("status", help="Show config/runtime state.")
     status_p.add_argument("--json", action="store_true", help="Output raw JSON.")
+
+    preset_list_p = sub.add_parser("preset-list", help="List built-in/user presets.")
+    preset_list_p.add_argument("--json", action="store_true", help="Output JSON.")
+
+    preset_apply_p = sub.add_parser("preset-apply", help="Apply preset to resource config.")
+    preset_apply_p.add_argument("--name", required=True, help="Preset name.")
+    preset_apply_p.add_argument("--replace", action="store_true", help="Replace if resource exists.")
+    preset_apply_p.add_argument(
+        "--no-apply",
+        dest="run_apply",
+        action="store_false",
+        help="Only update config, do not run apply.",
+    )
+    preset_apply_p.set_defaults(run_apply=True)
 
     probe_p = sub.add_parser("probe", help="Run connectivity probe.")
     probe_p.add_argument("--resource", help="Resource name (default: first profile).")
     probe_p.add_argument("--domain", help="Specific domain to probe.")
     probe_p.add_argument("--non-vpn-interface", help="Override non-VPN interface for probe.")
     probe_p.add_argument("--timeout", type=int, default=8, help="Probe timeout in seconds.")
+
+    access_p = sub.add_parser("access-check", help="Simple access verdict for resource.")
+    access_p.add_argument("--resource", required=True, help="Resource name.")
+    access_p.add_argument("--domain", help="Specific domain to check.")
+    access_p.add_argument("--timeout", type=int, default=8, help="Probe timeout in seconds.")
 
     add_p = sub.add_parser("resource-add", help="Add or replace generic resource profile.")
     add_p.add_argument("--name", required=True, help="Resource profile name.")
@@ -140,6 +175,10 @@ def build_parser() -> argparse.ArgumentParser:
     gui_p.add_argument("--host", default="127.0.0.1")
     gui_p.add_argument("--port", type=int, default=8877)
 
+    api_p = sub.add_parser("api", help="Run REST API server with generated OpenAPI.")
+    api_p.add_argument("--host", default="127.0.0.1")
+    api_p.add_argument("--port", type=int, default=8787)
+
     return parser
 
 
@@ -152,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "setup":
             result = svc.setup(
                 vpn_interface=args.vpn_interface,
+                resource_name=args.name,
                 domains=args.domain,
                 required_country=args.country,
                 required_server=args.server,
@@ -180,6 +220,21 @@ def main(argv: list[str] | None = None) -> int:
                 if not probe["passed"]:
                     return 1
             return 0
+
+        if args.command == "bootstrap":
+            result = svc.bootstrap(
+                preset_name=args.preset,
+                vpn_interface=args.vpn_interface,
+                install_bin=args.install_bin,
+                timeout=args.timeout,
+            )
+            verify = result["verify"]
+            print(f"Preset: {result['preset']}")
+            print(f"Bootstrap: {'PASS' if verify['passed'] else 'FAIL'}")
+            if verify["issues"]:
+                for issue in verify["issues"]:
+                    print(f"Issue: {issue}")
+            return 0 if verify["passed"] else 1
 
         if args.command == "apply":
             report = svc.apply()
@@ -243,6 +298,26 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Last apply: {status['state']['updated_at']}")
             return 0
 
+        if args.command == "preset-list":
+            presets = svc.list_presets()
+            if args.json:
+                print(json.dumps(presets, indent=2))
+            else:
+                for preset in presets:
+                    print(
+                        f"{preset['name']}: {preset['description']} "
+                        f"(domains={len(preset['domains'])})"
+                    )
+            return 0
+
+        if args.command == "preset-apply":
+            report = svc.apply_preset(name=args.name, replace=args.replace, run_apply=args.run_apply)
+            print(f"Preset applied: {report['preset']['name']}")
+            print(f"Run apply: {str(report['applied']).lower()}")
+            if report["apply_report"] is not None:
+                print(f"Counts: {report['apply_report']['counts']}")
+            return 0
+
         if args.command == "probe":
             report = svc.probe(
                 resource_name=args.resource,
@@ -252,6 +327,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_probe(report)
             return 0 if report["passed"] else 1
+
+        if args.command == "access-check":
+            report = svc.access_check(
+                resource_name=args.resource,
+                domain=args.domain,
+                timeout=args.timeout,
+            )
+            print(
+                f"Access check resource={report['resource']} mode={report['expected_mode']} "
+                f"vpn_reachable={str(report['vpn_reachable']).lower()} "
+                f"non_vpn_blocked={str(report['non_vpn_blocked']).lower()} "
+                f"result={'PASS' if report['access_ok'] else 'FAIL'}"
+            )
+            return 0 if report["access_ok"] else 1
 
         if args.command == "resource-add":
             cfg = svc.add_resource(
@@ -322,6 +411,12 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "gui":
             launch_gui(svc, host=args.host, port=args.port)
+            return 0
+
+        if args.command == "api":
+            from .api import run_api_server
+
+            run_api_server(host=args.host, port=args.port)
             return 0
 
         parser.print_help()

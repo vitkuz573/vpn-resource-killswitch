@@ -8,6 +8,7 @@ from vrks.errors import CLIError
 from vrks.firewall import build_nft_rules
 from vrks.models import ResourcePolicy, VpnContext
 from vrks.network import normalize_domain, normalize_domains, resolve_domains
+from vrks.presets import get_preset, list_presets
 from vrks.service import _policy_match
 
 
@@ -95,6 +96,16 @@ class PolicyTests(unittest.TestCase):
         allowed, reason = _policy_match(policy, context)
         self.assertFalse(allowed)
         self.assertIn("context_keyword_blocked", reason)
+
+
+class PresetTests(unittest.TestCase):
+    def test_preset_catalog_has_antigravity(self) -> None:
+        names = [item.name for item in list_presets()]
+        self.assertIn("antigravity", names)
+
+    def test_get_preset_contains_domains(self) -> None:
+        preset = get_preset("antigravity")
+        self.assertTrue(len(preset.domains) >= 2)
 
 
 if __name__ == "__main__":

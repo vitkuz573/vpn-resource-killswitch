@@ -98,7 +98,7 @@ PAGE_HTML = """<!doctype html>
 </head>
 <body>
   <h1>VPN Resource Kill-Switch</h1>
-  <div class="muted">Generic resource guard with country/server policy. Default profile: antigravity.</div>
+  <div class="muted">Generic resource guard with policy profiles and presets.</div>
 
   <div class="grid" style="margin-top: 16px;">
     <section class="card">
@@ -107,8 +107,17 @@ PAGE_HTML = """<!doctype html>
       <div class="row">
         <button onclick="runApply()">Apply Rules</button>
         <button class="alt" onclick="runProbe()">Probe</button>
+        <button onclick="bootstrapPreset()">Bootstrap Preset</button>
       </div>
       <div id="probe" style="margin-top:8px;"></div>
+      <label style="margin-top:10px; display:block;">Preset Name</label>
+      <input id="bootstrapPreset" placeholder="preset name">
+      <label style="margin-top:10px; display:block;">Access Check Resource</label>
+      <input id="checkResource" placeholder="resource name">
+      <div class="row">
+        <button class="alt" onclick="runAccessCheck()">Access Check</button>
+      </div>
+      <div id="accessResult" style="margin-top:8px;"></div>
     </section>
 
     <section class="card">
@@ -199,6 +208,12 @@ PAGE_HTML = """<!doctype html>
         showRuntime(status);
         renderResources(status.resources || []);
         document.getElementById('state').textContent = JSON.stringify(status.state || {}, null, 2);
+        if (!document.getElementById('bootstrapPreset').value.trim()) {
+          const presets = await api('/api/presets');
+          if (presets.length) {
+            document.getElementById('bootstrapPreset').value = presets[0].name;
+          }
+        }
       } catch (e) {
         document.getElementById('state').textContent = 'Error: ' + e.message;
       }
@@ -218,6 +233,45 @@ PAGE_HTML = """<!doctype html>
         const out = await api('/api/probe', {method: 'POST', body: '{}'});
         const ok = out.passed ? '<span class="ok">PASS</span>' : '<span class="err">FAIL</span>';
         document.getElementById('probe').innerHTML = 'Probe: ' + ok + ' (' + out.expected_mode + ')';
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function bootstrapPreset() {
+      try {
+        const presetName = document.getElementById('bootstrapPreset').value.trim();
+        if (!presetName) {
+          alert('Preset name is required');
+          return;
+        }
+        const out = await api('/api/bootstrap', {method: 'POST', body: JSON.stringify({preset_name: presetName, timeout: 8})});
+        const ok = out.verify && out.verify.passed ? '<span class="ok">PASS</span>' : '<span class="err">FAIL</span>';
+        document.getElementById('probe').innerHTML = 'Bootstrap ' + presetName + ': ' + ok;
+        await refresh();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runAccessCheck() {
+      try {
+        const resourceName = document.getElementById('checkResource').value.trim();
+        if (!resourceName) {
+          alert('Resource name is required');
+          return;
+        }
+        const payload = {
+          resource_name: resourceName,
+          timeout: 8
+        };
+        const out = await api('/api/access-check', {method: 'POST', body: JSON.stringify(payload)});
+        const ok = out.access_ok ? '<span class="ok">PASS</span>' : '<span class="err">FAIL</span>';
+        document.getElementById('accessResult').innerHTML =
+          'Access: ' + ok
+          + ' (mode=' + out.expected_mode
+          + ', vpn=' + out.vpn_reachable
+          + ', non-vpn-block=' + out.non_vpn_blocked + ')';
       } catch (e) {
         alert(e.message);
       }
@@ -332,6 +386,13 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                     _json_response(self, {"error": str(exc)}, status=500)
                 return
 
+            if path == "/api/presets":
+                try:
+                    _json_response(self, service.list_presets())
+                except Exception as exc:  # noqa: BLE001
+                    _json_response(self, {"error": str(exc)}, status=500)
+                return
+
             _json_response(self, {"error": "not found"}, status=404)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -351,6 +412,25 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         resource_name=data.get("resource_name"),
                         domain=data.get("domain"),
                         non_vpn_interface=data.get("non_vpn_interface"),
+                        timeout=int(data.get("timeout") or 8),
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/access-check":
+                    report = service.access_check(
+                        resource_name=str(data.get("resource_name") or ""),
+                        domain=data.get("domain"),
+                        timeout=int(data.get("timeout") or 8),
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/bootstrap":
+                    report = service.bootstrap(
+                        preset_name=str(data.get("preset_name") or ""),
+                        vpn_interface=data.get("vpn_interface"),
+                        install_bin=bool(data.get("install_bin", False)),
                         timeout=int(data.get("timeout") or 8),
                     )
                     _json_response(self, report)
