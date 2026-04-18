@@ -1,0 +1,2 @@
+class CLIError(RuntimeError):
+    pass
