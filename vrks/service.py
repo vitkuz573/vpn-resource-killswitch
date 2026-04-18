@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import shutil
+import time
 import sys
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,8 @@ from .constants import (
     SERVICE_PATH,
     TIMER_NAME,
     TIMER_PATH,
+    WATCH_SERVICE_NAME,
+    WATCH_SERVICE_PATH,
 )
 from .errors import CLIError
 from .firewall import apply_nft, delete_nft_table, nft_table_exists
@@ -26,6 +30,7 @@ from .network import (
     detect_vpn_interface,
     interface_is_up,
     normalize_country_codes,
+    normalize_keywords,
     normalize_domain,
     normalize_domains,
     normalize_resource_name,
@@ -33,7 +38,14 @@ from .network import (
     resolve_domains,
     validate_ifname,
 )
-from .runtime import disable_timer, enable_timer, install_runtime_tree, write_systemd_units
+from .runtime import (
+    disable_timer,
+    enable_timer,
+    install_nm_dispatcher_hook,
+    install_runtime_tree,
+    remove_nm_dispatcher_hook,
+    write_systemd_units,
+)
 from .system import ensure_root, run
 
 
@@ -47,7 +59,22 @@ def _has_policy(policy: ResourcePolicy) -> bool:
         or (policy.required_server or "").strip()
         or normalize_country_codes(policy.allowed_countries)
         or normalize_country_codes(policy.blocked_countries)
+        or normalize_keywords(policy.blocked_context_keywords)
     )
+
+
+def _context_haystack(context: VpnContext) -> str:
+    parts = [
+        context.ip or "",
+        context.country or "",
+        context.country_code or "",
+        context.region or "",
+        context.city or "",
+        context.isp or "",
+        context.org or "",
+        context.domain or "",
+    ]
+    return " ".join(parts).lower()
 
 
 def _policy_match(policy: ResourcePolicy, context: VpnContext | None) -> tuple[bool, str]:
@@ -55,7 +82,14 @@ def _policy_match(policy: ResourcePolicy, context: VpnContext | None) -> tuple[b
     need_server = (policy.required_server or "").strip()
     allowed_countries = normalize_country_codes(policy.allowed_countries)
     blocked_countries = normalize_country_codes(policy.blocked_countries)
-    if not need_country and not need_server and not allowed_countries and not blocked_countries:
+    blocked_keywords = normalize_keywords(policy.blocked_context_keywords)
+    if (
+        not need_country
+        and not need_server
+        and not allowed_countries
+        and not blocked_countries
+        and not blocked_keywords
+    ):
         return True, "no_policy_constraints"
 
     if context is None:
@@ -68,6 +102,12 @@ def _policy_match(policy: ResourcePolicy, context: VpnContext | None) -> tuple[b
             return False, "country_code_unavailable_for_blocked_policy"
         if current_country_code in set(blocked_countries):
             return False, f"country_blocked(current={current_country_code})"
+
+    if blocked_keywords:
+        haystack = _context_haystack(context)
+        for keyword in blocked_keywords:
+            if keyword in haystack:
+                return False, f"context_keyword_blocked(keyword={keyword})"
 
     if allowed_countries:
         if not current_country_code:
@@ -119,6 +159,7 @@ class KillSwitchService:
         required_server: str | None,
         allowed_countries: list[str] | None,
         blocked_countries: list[str] | None,
+        blocked_context_keywords: list[str] | None,
         install_bin: bool,
     ) -> dict[str, Any]:
         ensure_root()
@@ -136,6 +177,7 @@ class KillSwitchService:
                 required_server=(required_server or None),
                 allowed_countries=normalize_country_codes(allowed_countries),
                 blocked_countries=normalize_country_codes(blocked_countries),
+                blocked_context_keywords=normalize_keywords(blocked_context_keywords),
             ),
         )
         config = AppConfig(version=CONFIG_VERSION, vpn_interface=vpn_if, resources=[initial])
@@ -147,6 +189,7 @@ class KillSwitchService:
             exec_path = f"{sys.executable} {(self.project_root / 'vrks.py').resolve()}"
 
         write_systemd_units(exec_path)
+        install_nm_dispatcher_hook()
         enable_timer()
 
         report = self.apply(config=config)
@@ -209,6 +252,9 @@ class KillSwitchService:
                     "required_server": resource.policy.required_server,
                     "allowed_countries": normalize_country_codes(resource.policy.allowed_countries),
                     "blocked_countries": normalize_country_codes(resource.policy.blocked_countries),
+                    "blocked_context_keywords": normalize_keywords(
+                        resource.policy.blocked_context_keywords
+                    ),
                 },
                 "mode": mode,
                 "reason": reason,
@@ -261,12 +307,22 @@ class KillSwitchService:
         state = storage.load_state()
         enabled = run(["systemctl", "is-enabled", TIMER_NAME], check=False).stdout.strip() or "unknown"
         active = run(["systemctl", "is-active", TIMER_NAME], check=False).stdout.strip() or "unknown"
+        watch_enabled = (
+            run(["systemctl", "is-enabled", WATCH_SERVICE_NAME], check=False).stdout.strip()
+            or "unknown"
+        )
+        watch_active = (
+            run(["systemctl", "is-active", WATCH_SERVICE_NAME], check=False).stdout.strip()
+            or "unknown"
+        )
         return {
             "config": config,
             "vpn_up": interface_is_up(config.vpn_interface),
             "nft_table_present": nft_table_exists(),
             "timer_enabled": enabled,
             "timer_active": active,
+            "watch_enabled": watch_enabled,
+            "watch_active": watch_active,
             "state": state,
         }
 
@@ -279,6 +335,7 @@ class KillSwitchService:
         required_server: str | None,
         allowed_countries: list[str] | None,
         blocked_countries: list[str] | None,
+        blocked_context_keywords: list[str] | None,
         replace: bool,
     ) -> AppConfig:
         ensure_root()
@@ -293,6 +350,7 @@ class KillSwitchService:
                 required_server=(required_server or None),
                 allowed_countries=normalize_country_codes(allowed_countries),
                 blocked_countries=normalize_country_codes(blocked_countries),
+                blocked_context_keywords=normalize_keywords(blocked_context_keywords),
             ),
         )
 
@@ -337,6 +395,9 @@ class KillSwitchService:
                         "required_server": resource.policy.required_server,
                         "allowed_countries": normalize_country_codes(resource.policy.allowed_countries),
                         "blocked_countries": normalize_country_codes(resource.policy.blocked_countries),
+                        "blocked_context_keywords": normalize_keywords(
+                            resource.policy.blocked_context_keywords
+                        ),
                     },
                 }
             )
@@ -399,6 +460,93 @@ class KillSwitchService:
             "passed": passed,
         }
 
+    def verify(self, *, resources: list[str] | None, timeout: int) -> dict[str, Any]:
+        status = self.status()
+        config = status["config"]
+        issues: list[str] = []
+        probes: list[dict[str, Any]] = []
+
+        if status["timer_enabled"] != "enabled":
+            issues.append(f"timer_not_enabled({status['timer_enabled']})")
+        if status["timer_active"] != "active":
+            issues.append(f"timer_not_active({status['timer_active']})")
+        if status["watch_enabled"] != "enabled":
+            issues.append(f"watch_not_enabled({status['watch_enabled']})")
+        if status["watch_active"] != "active":
+            issues.append(f"watch_not_active({status['watch_active']})")
+        if not status["nft_table_present"]:
+            issues.append("nft_table_missing")
+        if not status["vpn_up"]:
+            issues.append("vpn_interface_down")
+
+        wanted = {normalize_resource_name(item) for item in (resources or [])}
+        selected = []
+        for resource in config.resources:
+            name = normalize_resource_name(resource.name)
+            if wanted and name not in wanted:
+                continue
+            if not resource.enabled:
+                continue
+            selected.append(name)
+
+        if wanted and not selected:
+            raise CLIError("No requested resources found in config.")
+
+        for name in selected:
+            probe = self.probe(
+                resource_name=name,
+                domain=None,
+                non_vpn_interface=None,
+                timeout=timeout,
+            )
+            probes.append(probe)
+            if not probe["passed"]:
+                issues.append(f"probe_failed({name})")
+
+        return {
+            "passed": len(issues) == 0,
+            "issues": issues,
+            "checks": {
+                "timer_enabled": status["timer_enabled"],
+                "timer_active": status["timer_active"],
+                "watch_enabled": status["watch_enabled"],
+                "watch_active": status["watch_active"],
+                "nft_table_present": status["nft_table_present"],
+                "vpn_up": status["vpn_up"],
+            },
+            "probes": probes,
+        }
+
+    def watch(self, *, debounce_seconds: float = 1.0) -> int:
+        ensure_root()
+        last_apply_at = 0.0
+
+        def _maybe_apply(trigger: str) -> None:
+            nonlocal last_apply_at
+            now = time.monotonic()
+            if (now - last_apply_at) < debounce_seconds:
+                return
+            self.apply()
+            last_apply_at = now
+            print(f"[watch] rules refreshed: {trigger}", flush=True)
+
+        _maybe_apply("startup")
+        proc = subprocess.Popen(
+            ["ip", "monitor", "link", "route", "address"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            text = line.strip()
+            if not text:
+                continue
+            # Any route/address/link change can alter VPN path or DNS behavior.
+            _maybe_apply(text)
+        return proc.wait()
+
     def disable(self) -> None:
         ensure_root()
         delete_nft_table()
@@ -407,11 +555,14 @@ class KillSwitchService:
         ensure_root()
         delete_nft_table()
         disable_timer()
+        remove_nm_dispatcher_hook()
 
         if SERVICE_PATH.exists():
             SERVICE_PATH.unlink()
         if TIMER_PATH.exists():
             TIMER_PATH.unlink()
+        if WATCH_SERVICE_PATH.exists():
+            WATCH_SERVICE_PATH.unlink()
         run(["systemctl", "daemon-reload"], check=False)
 
         if purge:

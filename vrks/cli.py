@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Block listed ISO country codes for antigravity profile (repeat option).",
     )
     setup_p.add_argument(
+        "--block-context",
+        action="append",
+        help="Block by VPN context keyword (country/region/city/org/isp/domain), repeat option.",
+    )
+    setup_p.add_argument(
         "--no-install-bin",
         dest="install_bin",
         action="store_false",
@@ -96,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Block listed ISO country codes for this resource (repeat option).",
     )
+    add_p.add_argument(
+        "--block-context",
+        action="append",
+        help="Block by VPN context keyword (country/region/city/org/isp/domain), repeat option.",
+    )
     add_p.add_argument("--replace", action="store_true", help="Replace if profile exists.")
 
     rm_p = sub.add_parser("resource-remove", help="Remove resource profile.")
@@ -103,6 +113,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_p = sub.add_parser("resource-list", help="List configured resources.")
     list_p.add_argument("--json", action="store_true", help="Output JSON.")
+
+    verify_p = sub.add_parser("verify", help="Run full health verification (checks + probes).")
+    verify_p.add_argument(
+        "--resource",
+        action="append",
+        help="Verify only selected resource(s), repeat option. Default: all enabled resources.",
+    )
+    verify_p.add_argument("--timeout", type=int, default=8, help="Probe timeout in seconds.")
+
+    watch_p = sub.add_parser("watch", help="Run realtime monitor and re-apply rules on link/route changes.")
+    watch_p.add_argument(
+        "--debounce",
+        type=float,
+        default=1.0,
+        help="Minimum seconds between apply runs when many events arrive.",
+    )
 
     disable_p = sub.add_parser("disable", help="Disable nft table now.")
 
@@ -131,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                 required_server=args.server,
                 allowed_countries=args.allow_country,
                 blocked_countries=args.block_country,
+                blocked_context_keywords=args.block_context,
                 install_bin=args.install_bin,
             )
             cfg = result["config"]
@@ -181,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
                                     "required_server": r.policy.required_server,
                                     "allowed_countries": r.policy.allowed_countries or [],
                                     "blocked_countries": r.policy.blocked_countries or [],
+                                    "blocked_context_keywords": r.policy.blocked_context_keywords or [],
                                 },
                             }
                             for r in status["config"].resources
@@ -190,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
                     "nft_table_present": status["nft_table_present"],
                     "timer_enabled": status["timer_enabled"],
                     "timer_active": status["timer_active"],
+                    "watch_enabled": status["watch_enabled"],
+                    "watch_active": status["watch_active"],
                     "state": status["state"],
                 }
                 print(json.dumps(printable, indent=2))
@@ -198,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"VPN UP: {str(status['vpn_up']).lower()}")
                 print(f"nft table: {str(status['nft_table_present']).lower()}")
                 print(f"timer: {status['timer_enabled']} / {status['timer_active']}")
+                print(f"watch: {status['watch_enabled']} / {status['watch_active']}")
                 print("Resources:")
                 for resource in status["config"].resources:
                     print(
@@ -205,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
                         f"country={resource.policy.required_country or '-'} "
                         f"server={resource.policy.required_server or '-'} "
                         f"allow={','.join(resource.policy.allowed_countries or []) or '-'} "
-                        f"block={','.join(resource.policy.blocked_countries or []) or '-'}"
+                        f"block={','.join(resource.policy.blocked_countries or []) or '-'} "
+                        f"ctxblock={','.join(resource.policy.blocked_context_keywords or []) or '-'}"
                     )
                 if status["state"] and status["state"].get("updated_at"):
                     print(f"Last apply: {status['state']['updated_at']}")
@@ -229,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
                 required_server=args.server,
                 allowed_countries=args.allow_country,
                 blocked_countries=args.block_country,
+                blocked_context_keywords=args.block_context,
                 replace=args.replace,
             )
             print(f"Resource saved. Total resources: {len(cfg.resources)}")
@@ -251,9 +284,31 @@ def main(argv: list[str] | None = None) -> int:
                         f"[country={policy['required_country'] or '-'}, "
                         f"server={policy['required_server'] or '-'}, "
                         f"allow={','.join(policy.get('allowed_countries') or []) or '-'}, "
-                        f"block={','.join(policy.get('blocked_countries') or []) or '-'}]"
+                        f"block={','.join(policy.get('blocked_countries') or []) or '-'}, "
+                        f"ctxblock={','.join(policy.get('blocked_context_keywords') or []) or '-'}]"
                     )
             return 0
+
+        if args.command == "verify":
+            report = svc.verify(resources=args.resource, timeout=args.timeout)
+            print(f"Overall: {'PASS' if report['passed'] else 'FAIL'}")
+            print(
+                "Checks: "
+                f"timer_enabled={report['checks']['timer_enabled']} "
+                f"timer_active={report['checks']['timer_active']} "
+                f"watch_enabled={report['checks']['watch_enabled']} "
+                f"watch_active={report['checks']['watch_active']} "
+                f"nft={str(report['checks']['nft_table_present']).lower()} "
+                f"vpn_up={str(report['checks']['vpn_up']).lower()}"
+            )
+            for issue in report["issues"]:
+                print(f"Issue: {issue}")
+            for probe in report["probes"]:
+                print(f"Probe resource={probe['resource']}: {'PASS' if probe['passed'] else 'FAIL'}")
+            return 0 if report["passed"] else 1
+
+        if args.command == "watch":
+            return svc.watch(debounce_seconds=args.debounce)
 
         if args.command == "disable":
             svc.disable()

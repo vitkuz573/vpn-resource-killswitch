@@ -11,9 +11,11 @@ Default out-of-box profile is `antigravity`, but you can add any resource set.
   - `required_server` (substring match against VPN egress IP / org / ISP / domain)
   - `allowed_countries` (ISO code allow-list)
   - `blocked_countries` (ISO code deny-list)
+  - `blocked_context_keywords` (substring deny-list over VPN context: country/region/city/org/isp/domain/ip)
 - If policy mismatch happens, resource is hard-blocked on all interfaces.
 - Works with any VPN provider because enforcement is interface-based (`tun`, `wg`, etc.).
 - Includes both CLI and web GUI.
+- Instant reaction path: realtime `watch` service + NetworkManager dispatcher + periodic timer.
 
 ## Architecture
 
@@ -23,7 +25,7 @@ Default out-of-box profile is `antigravity`, but you can add any resource set.
 - `vrks/network.py`: interface detection, DNS resolve, egress country/server lookup, probe.
 - `vrks/firewall.py`: nftables rule generation and apply.
 - `vrks/storage.py`: config/state persistence.
-- `vrks/runtime.py`: runtime install (`/usr/local/bin/vrks`) + systemd timer.
+- `vrks/runtime.py`: runtime install (`/usr/local/bin/vrks`) + systemd timer/watch/dispatcher integration.
 
 ## Quick start
 
@@ -43,6 +45,8 @@ sudo python3 vrks.py resource-add \
   --allow-country US \
   --allow-country DE \
   --block-country RU \
+  --block-context crimea \
+  --block-context donetsk \
   --server m247
 
 sudo python3 vrks.py apply
@@ -55,6 +59,15 @@ sudo python3 vrks.py gui --host 127.0.0.1 --port 8877
 ```
 
 Then open `http://127.0.0.1:8877`.
+
+## Verify / Watch
+
+```bash
+sudo python3 vrks.py verify
+sudo python3 vrks.py watch
+```
+
+`watch` usually runs as systemd service and reapplies rules instantly on route/link/address changes.
 
 ## Config format
 
@@ -72,7 +85,8 @@ Stored at `/etc/vpn-resource-killswitch/config.json`:
         "required_country": null,
         "required_server": null,
         "allowed_countries": [],
-        "blocked_countries": ["RU", "CU", "IR", "KP"]
+        "blocked_countries": [],
+        "blocked_context_keywords": []
       },
       "enabled": true
     }
@@ -89,6 +103,24 @@ For country-level Google embargo logic, use:
 - `KP` (North Korea)
 
 Region-level Google restrictions (Crimea, DNR, LNR) are not representable via plain country code and need region-aware geodata.
+
+Example strict antigravity policy without hardcoded defaults:
+
+```bash
+sudo python3 vrks.py resource-add \
+  --name antigravity \
+  --domain elgoog.im \
+  --domain mrdoob.com \
+  --block-country RU \
+  --block-country CU \
+  --block-country IR \
+  --block-country KP \
+  --block-context crimea \
+  --block-context donetsk \
+  --block-context luhansk \
+  --replace
+sudo python3 vrks.py apply
+```
 
 ## Tests
 

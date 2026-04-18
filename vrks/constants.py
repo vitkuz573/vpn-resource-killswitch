@@ -11,6 +11,7 @@ CONFIG_DIR = Path("/etc/vpn-resource-killswitch")
 CONFIG_PATH = CONFIG_DIR / "config.json"
 STATE_DIR = Path("/var/lib/vpn-resource-killswitch")
 STATE_PATH = STATE_DIR / "state.json"
+NM_DISPATCHER_PATH = Path("/etc/NetworkManager/dispatcher.d/90-vrks-refresh")
 
 BIN_PATH = Path("/usr/local/bin/vrks")
 RUNTIME_ROOT = Path("/usr/local/lib/vpn-resource-killswitch")
@@ -21,6 +22,8 @@ SERVICE_NAME = "vpn-resource-killswitch-refresh.service"
 TIMER_NAME = "vpn-resource-killswitch-refresh.timer"
 SERVICE_PATH = Path("/etc/systemd/system") / SERVICE_NAME
 TIMER_PATH = Path("/etc/systemd/system") / TIMER_NAME
+WATCH_SERVICE_NAME = "vpn-resource-killswitch-watch.service"
+WATCH_SERVICE_PATH = Path("/etc/systemd/system") / WATCH_SERVICE_NAME
 
 DEFAULT_PROFILE_NAME = "antigravity"
 DEFAULT_PROFILE_DOMAINS = ("mrdoob.com", "elgoog.im")

@@ -9,6 +9,7 @@ class ResourcePolicy:
     required_server: str | None = None
     allowed_countries: list[str] | None = None
     blocked_countries: list[str] | None = None
+    blocked_context_keywords: list[str] | None = None
 
 
 @dataclass
@@ -31,6 +32,8 @@ class VpnContext:
     ip: str | None = None
     country: str | None = None
     country_code: str | None = None
+    region: str | None = None
+    city: str | None = None
     isp: str | None = None
     org: str | None = None
     domain: str | None = None

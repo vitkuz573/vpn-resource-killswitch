@@ -125,6 +125,8 @@ PAGE_HTML = """<!doctype html>
       <input id="allowCountries" placeholder="US,DE,FR">
       <label>Blocked Country Codes (optional, comma-separated)</label>
       <input id="blockCountries" placeholder="RU,IR,KP">
+      <label>Blocked Context Keywords (optional, comma-separated)</label>
+      <input id="blockContext" placeholder="crimea,donetsk,luhansk">
       <div class="row">
         <button onclick="addResource(false)">Add</button>
         <button class="alt" onclick="addResource(true)">Replace</button>
@@ -160,7 +162,8 @@ PAGE_HTML = """<!doctype html>
         '<div><b>VPN IF:</b> ' + (c.vpn_interface || '-') + '</div>',
         '<div><b>VPN up:</b> ' + status.vpn_up + '</div>',
         '<div><b>nft table:</b> ' + status.nft_table_present + '</div>',
-        '<div><b>timer:</b> ' + status.timer_enabled + ' / ' + status.timer_active + '</div>'
+        '<div><b>timer:</b> ' + status.timer_enabled + ' / ' + status.timer_active + '</div>',
+        '<div><b>watch:</b> ' + status.watch_enabled + ' / ' + status.watch_active + '</div>'
       ].join('');
       document.getElementById('runtime').innerHTML = html;
     }
@@ -179,7 +182,8 @@ PAGE_HTML = """<!doctype html>
           policy.required_country ? '<span class="pill">country=' + policy.required_country + '</span>' : '',
           policy.required_server ? '<span class="pill">server~=' + policy.required_server + '</span>' : '',
           (policy.allowed_countries || []).length ? '<span class="pill">allow=' + policy.allowed_countries.join('/') + '</span>' : '',
-          (policy.blocked_countries || []).length ? '<span class="pill">block=' + policy.blocked_countries.join('/') + '</span>' : ''
+          (policy.blocked_countries || []).length ? '<span class="pill">block=' + policy.blocked_countries.join('/') + '</span>' : '',
+          (policy.blocked_context_keywords || []).length ? '<span class="pill">ctx=' + policy.blocked_context_keywords.join('/') + '</span>' : ''
         ].join('');
         return '<div style="margin-bottom:12px;">'
           + badges
@@ -235,6 +239,10 @@ PAGE_HTML = """<!doctype html>
         required_server: document.getElementById('server').value.trim() || null,
         allowed_countries: allowCountries,
         blocked_countries: blockCountries,
+        blocked_context_keywords: document.getElementById('blockContext').value
+          .split(',')
+          .map(x => x.trim())
+          .filter(Boolean),
         replace
       };
       try {
@@ -275,6 +283,7 @@ def _serialize_config(config: AppConfig) -> dict[str, Any]:
                     "required_server": resource.policy.required_server,
                     "allowed_countries": resource.policy.allowed_countries or [],
                     "blocked_countries": resource.policy.blocked_countries or [],
+                    "blocked_context_keywords": resource.policy.blocked_context_keywords or [],
                 },
             }
             for resource in config.resources
@@ -313,6 +322,8 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         "nft_table_present": status["nft_table_present"],
                         "timer_enabled": status["timer_enabled"],
                         "timer_active": status["timer_active"],
+                        "watch_enabled": status["watch_enabled"],
+                        "watch_active": status["watch_active"],
                         "state": status["state"],
                         "resources": service.list_resources(),
                     }
@@ -353,6 +364,9 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         required_server=data.get("required_server"),
                         allowed_countries=[str(x) for x in (data.get("allowed_countries") or [])],
                         blocked_countries=[str(x) for x in (data.get("blocked_countries") or [])],
+                        blocked_context_keywords=[
+                            str(x) for x in (data.get("blocked_context_keywords") or [])
+                        ],
                         replace=bool(data.get("replace", False)),
                     )
                     _json_response(self, {"ok": True})

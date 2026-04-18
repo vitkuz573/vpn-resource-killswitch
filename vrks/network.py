@@ -53,6 +53,20 @@ def normalize_country_codes(codes: Iterable[str] | None) -> list[str]:
     return sorted({normalize_country_code(code) for code in codes})
 
 
+def normalize_keywords(values: Iterable[str] | None) -> list[str]:
+    if not values:
+        return []
+    out: set[str] = set()
+    for item in values:
+        value = item.strip().lower()
+        if not value:
+            continue
+        if len(value) < 2:
+            raise CLIError(f"Invalid keyword: {item!r}. Use at least 2 characters.")
+        out.add(value)
+    return sorted(out)
+
+
 def validate_ifname(ifname: str) -> str:
     value = ifname.strip()
     if not IFNAME_RE.match(value):
@@ -162,6 +176,8 @@ def detect_vpn_context(vpn_interface: str, timeout: int = 8) -> tuple[VpnContext
         ip=data.get("ip"),
         country=data.get("country"),
         country_code=data.get("country_code"),
+        region=data.get("region"),
+        city=data.get("city"),
         isp=connection.get("isp"),
         org=connection.get("org"),
         domain=connection.get("domain"),

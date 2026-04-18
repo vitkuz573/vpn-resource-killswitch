@@ -84,6 +84,18 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(allowed)
         self.assertEqual(reason, "policy_match")
 
+    def test_policy_blocks_by_context_keyword(self) -> None:
+        policy = ResourcePolicy(blocked_context_keywords=["crimea", "dnr"])
+        context = VpnContext(
+            country="Ukraine",
+            country_code="UA",
+            region="Crimea",
+            city="Sevastopol",
+        )
+        allowed, reason = _policy_match(policy, context)
+        self.assertFalse(allowed)
+        self.assertIn("context_keyword_blocked", reason)
+
 
 if __name__ == "__main__":
     unittest.main()
