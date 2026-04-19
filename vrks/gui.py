@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .errors import CLIError
+from .mitm_ca import ensure_local_ca, local_ca_status, trust_local_ca
 from .models import AppConfig
 from .service import KillSwitchService
 
@@ -132,7 +133,7 @@ PAGE_HTML = """<!doctype html>
       </div>
       <div id="discoverResult" style="margin-top:8px;"></div>
       <label style="margin-top:12px; display:block;">Runtime Capture Command</label>
-      <input id="runtimeCmd" placeholder="/tmp/antigravity_ide/Antigravity/antigravity">
+      <input id="runtimeCmd" placeholder="/path/to/your/app --flags">
       <label style="margin-top:10px; display:block;">Run Command As User (optional)</label>
       <input id="runtimeUser" placeholder="vitaly">
       <div class="row">
@@ -140,7 +141,7 @@ PAGE_HTML = """<!doctype html>
         <input id="runtimeStartupDelay" type="number" min="0" max="300" step="0.5" value="2" style="width:110px;">
       </div>
       <label style="margin-top:10px; display:block;">Runtime Include Regex (comma-separated)</label>
-      <input id="runtimeInclude" placeholder="antigravity|googleapis|google\\.com|gvt1|run\\.app">
+      <input id="runtimeInclude" placeholder="service|cdn|api|googleapis|cloudfront">
       <label style="margin-top:10px; display:block;">Runtime Exclude Regex (comma-separated)</label>
       <input id="runtimeExclude" placeholder="microsoft\\.com|cloudapp\\.azure\\.com|localhost|127\\.0\\.0\\.1">
       <div class="row">
@@ -148,6 +149,16 @@ PAGE_HTML = """<!doctype html>
         <button onclick="runRuntimeAutofill()">Runtime Autofill</button>
       </div>
       <div id="runtimeResult" style="margin-top:8px;"></div>
+      <h2 style="margin-top:14px;">HTTPS Block Page (MITM)</h2>
+      <div id="mitmStatus" class="muted"></div>
+      <label style="margin-top:10px; display:block;">CA Common Name</label>
+      <input id="caCommonName" placeholder="VRKS Local MITM CA">
+      <div class="row">
+        <button class="alt" onclick="runCaStatus()">CA Status</button>
+        <button onclick="runCaInit()">Init CA</button>
+        <button class="alt" onclick="runCaTrust()">Trust CA</button>
+      </div>
+      <div id="mitmResult" style="margin-top:8px;"></div>
     </section>
 
     <section class="card">
@@ -197,14 +208,21 @@ PAGE_HTML = """<!doctype html>
 
     function showRuntime(status) {
       const c = status.config || {};
+      const ca = status.local_ca || {};
       const html = [
         '<div><b>VPN IF:</b> ' + (c.vpn_interface || '-') + '</div>',
         '<div><b>VPN up:</b> ' + status.vpn_up + '</div>',
         '<div><b>nft table:</b> ' + status.nft_table_present + '</div>',
+        '<div><b>nft nat table:</b> ' + status.nft_nat_table_present + '</div>',
         '<div><b>timer:</b> ' + status.timer_enabled + ' / ' + status.timer_active + '</div>',
-        '<div><b>watch:</b> ' + status.watch_enabled + ' / ' + status.watch_active + '</div>'
+        '<div><b>watch:</b> ' + status.watch_enabled + ' / ' + status.watch_active + '</div>',
+        '<div><b>blockpage:</b> ' + status.blockpage_enabled + ' / ' + status.blockpage_active + '</div>',
+        '<div><b>blockpage-tls:</b> ' + status.tls_blockpage_enabled + ' / ' + status.tls_blockpage_active + '</div>'
       ].join('');
       document.getElementById('runtime').innerHTML = html;
+      document.getElementById('mitmStatus').textContent =
+        'Local CA exists: ' + !!ca.exists
+        + ' | cert: ' + (ca.ca_cert_path || '-');
     }
 
     function renderResources(items) {
@@ -458,6 +476,42 @@ PAGE_HTML = """<!doctype html>
       }
     }
 
+    async function runCaStatus() {
+      try {
+        const out = await api('/api/mitm/ca-status');
+        document.getElementById('mitmResult').innerHTML =
+          'CA exists=' + !!out.exists
+          + ', cert=' + (out.ca_cert_path || '-');
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runCaInit() {
+      try {
+        const commonName = document.getElementById('caCommonName').value.trim() || 'VRKS Local MITM CA';
+        const out = await api('/api/mitm/ca-init', {
+          method: 'POST',
+          body: JSON.stringify({common_name: commonName})
+        });
+        document.getElementById('mitmResult').innerHTML =
+          'CA init: created=' + !!out.created + ', cert=' + (out.ca_cert_path || '-');
+        await refresh();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runCaTrust() {
+      try {
+        const out = await api('/api/mitm/ca-trust', {method: 'POST', body: '{}'});
+        document.getElementById('mitmResult').innerHTML =
+          'CA trusted via ' + (out.method || '-') + ' (' + (out.target || '-') + ')';
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
     async function addResource(replace) {
       const allowCountries = document.getElementById('allowCountries').value
         .split(',')
@@ -555,14 +609,27 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         "config": _serialize_config(status["config"]),
                         "vpn_up": status["vpn_up"],
                         "nft_table_present": status["nft_table_present"],
+                        "nft_nat_table_present": status["nft_nat_table_present"],
                         "timer_enabled": status["timer_enabled"],
                         "timer_active": status["timer_active"],
                         "watch_enabled": status["watch_enabled"],
                         "watch_active": status["watch_active"],
+                        "blockpage_enabled": status["blockpage_enabled"],
+                        "blockpage_active": status["blockpage_active"],
+                        "tls_blockpage_enabled": status["tls_blockpage_enabled"],
+                        "tls_blockpage_active": status["tls_blockpage_active"],
+                        "local_ca": status["local_ca"],
                         "state": status["state"],
                         "resources": service.list_resources(),
                     }
                     _json_response(self, payload)
+                except Exception as exc:  # noqa: BLE001
+                    _json_response(self, {"error": str(exc)}, status=500)
+                return
+
+            if path == "/api/mitm/ca-status":
+                try:
+                    _json_response(self, local_ca_status())
                 except Exception as exc:  # noqa: BLE001
                     _json_response(self, {"error": str(exc)}, status=500)
                 return
@@ -585,6 +652,16 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
             try:
                 if path == "/api/apply":
                     report = service.apply()
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/mitm/ca-init":
+                    report = ensure_local_ca(common_name=str(data.get("common_name") or "VRKS Local MITM CA"))
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/mitm/ca-trust":
+                    report = trust_local_ca()
                     _json_response(self, report)
                     return
 

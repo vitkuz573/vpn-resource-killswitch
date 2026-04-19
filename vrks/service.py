@@ -6,25 +6,35 @@ import shutil
 import time
 import sys
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from . import storage
 from .constants import (
+    BLOCK_PAGE_PORT,
+    BLOCKPAGE_SERVICE_NAME,
+    BLOCKPAGE_SERVICE_PATH,
     BIN_PATH,
+    CA_DIR,
     CONFIG_VERSION,
     DEFAULT_PROFILE_NAME,
     RUNTIME_ROOT,
     SERVICE_PATH,
     TIMER_NAME,
     TIMER_PATH,
+    TLS_BLOCK_PAGE_PORT,
+    TLS_BLOCKPAGE_SERVICE_NAME,
+    TLS_BLOCKPAGE_SERVICE_PATH,
+    TLS_CERT_CACHE_DIR,
     WATCH_SERVICE_NAME,
     WATCH_SERVICE_PATH,
 )
 from .discovery import discover_domains
 from .errors import CLIError
-from .firewall import apply_nft, delete_nft_table, nft_table_exists
+from .firewall import apply_nft, delete_nft_table, nft_nat_table_exists, nft_table_exists
 from .models import AppConfig, ResourcePolicy, ResourceProfile, VpnContext
+from .mitm_ca import local_ca_status
 from .network import (
     detect_non_vpn_interface,
     detect_vpn_context,
@@ -39,6 +49,7 @@ from .network import (
     resolve_domains,
     validate_ifname,
 )
+from .notifications import publish_event
 from .presets import get_preset, list_presets
 from .runtime import (
     disable_timer,
@@ -50,6 +61,8 @@ from .runtime import (
 )
 from .system import ensure_root, run
 from .traffic import discover_runtime_domains, parse_command
+
+MAX_STATE_EVENTS = 120
 
 
 def _sorted_ips(values: set[str]) -> list[str]:
@@ -147,6 +160,136 @@ def _resource_by_name(config: AppConfig, name: str) -> ResourceProfile:
         if normalize_resource_name(resource.name) == target:
             return resource
     raise CLIError(f"Resource '{target}' not found.")
+
+
+def _bool_or_none(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _http_code_is_block_page(http_code: str | None) -> bool:
+    return (http_code or "").strip() == "451"
+
+
+def _probe_result_is_blocked(*, returncode: int, http_code: str) -> bool:
+    if returncode != 0:
+        return True
+    if http_code == "000":
+        return True
+    return _http_code_is_block_page(http_code)
+
+
+def _new_event(
+    *,
+    kind: str,
+    severity: str,
+    title: str,
+    message: str,
+    resource: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ts": datetime.now(UTC).isoformat(),
+        "kind": kind,
+        "severity": severity,
+        "title": title,
+        "message": message,
+    }
+    if resource:
+        payload["resource"] = resource
+    if details:
+        payload["details"] = details
+    return payload
+
+
+def _build_transition_events(
+    *,
+    previous_resources: dict[str, Any],
+    current_resources: dict[str, Any],
+    vpn_interface: str,
+    previous_vpn_up: bool | None,
+    current_vpn_up: bool,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    for name, current in sorted(current_resources.items(), key=lambda item: item[0]):
+        current_mode = str(current.get("mode") or "")
+        current_reason = str(current.get("reason") or "unknown")
+        previous = previous_resources.get(name) or {}
+        previous_mode = str(previous.get("mode") or "")
+
+        if current_mode == "hard_block" and previous_mode != "hard_block":
+            events.append(
+                _new_event(
+                    kind="resource_hard_block",
+                    severity="critical",
+                    resource=name,
+                    title=f"VRKS: {name} blocked",
+                    message=f"{name} switched to hard_block ({current_reason}).",
+                    details={"mode": current_mode, "reason": current_reason},
+                )
+            )
+            continue
+
+        if current_mode == "vpn_only" and previous_mode == "hard_block":
+            events.append(
+                _new_event(
+                    kind="resource_vpn_only_restored",
+                    severity="normal",
+                    resource=name,
+                    title=f"VRKS: {name} restored",
+                    message=f"{name} switched back to vpn_only.",
+                    details={"mode": current_mode},
+                )
+            )
+
+    if previous_vpn_up is None:
+        if not current_vpn_up:
+            events.append(
+                _new_event(
+                    kind="vpn_down",
+                    severity="critical",
+                    title="VRKS: VPN interface down",
+                    message=f"{vpn_interface} is down. Protected resources stay blocked outside VPN.",
+                    details={"vpn_interface": vpn_interface},
+                )
+            )
+    elif previous_vpn_up != current_vpn_up:
+        if not current_vpn_up:
+            events.append(
+                _new_event(
+                    kind="vpn_down",
+                    severity="critical",
+                    title="VRKS: VPN interface down",
+                    message=f"{vpn_interface} is down. Protected resources stay blocked outside VPN.",
+                    details={"vpn_interface": vpn_interface},
+                )
+            )
+        else:
+            events.append(
+                _new_event(
+                    kind="vpn_up",
+                    severity="normal",
+                    title="VRKS: VPN interface restored",
+                    message=f"{vpn_interface} is up again.",
+                    details={"vpn_interface": vpn_interface},
+                )
+            )
+
+    return events
+
+
+def _merge_events(previous_events: Any, new_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    existing: list[dict[str, Any]] = []
+    if isinstance(previous_events, list):
+        for item in previous_events:
+            if isinstance(item, dict):
+                existing.append(item)
+    merged = existing + new_events
+    if len(merged) > MAX_STATE_EVENTS:
+        merged = merged[-MAX_STATE_EVENTS:]
+    return merged
 
 
 class KillSwitchService:
@@ -619,6 +762,8 @@ class KillSwitchService:
 
         previous_state = storage.load_state() or {}
         previous_resources = previous_state.get("resources") or {}
+        previous_vpn_up = _bool_or_none(previous_state.get("vpn_up"))
+        vpn_up_now = interface_is_up(current.vpn_interface)
 
         needs_context = any(_has_policy(r.policy) for r in current.resources if r.enabled)
         context, context_error = (None, None)
@@ -688,15 +833,28 @@ class KillSwitchService:
             vpn_only_v6=vpn_only_v6,
             hard_block_v4=hard_block_v4,
             hard_block_v6=hard_block_v6,
+            block_page_port=BLOCK_PAGE_PORT,
+            tls_block_page_port=TLS_BLOCK_PAGE_PORT,
         )
+
+        transition_events = _build_transition_events(
+            previous_resources=previous_resources,
+            current_resources=resource_state,
+            vpn_interface=current.vpn_interface,
+            previous_vpn_up=previous_vpn_up,
+            current_vpn_up=vpn_up_now,
+        )
+        merged_events = _merge_events(previous_state.get("events"), transition_events)
 
         storage.save_state(
             {
                 "vpn_interface": current.vpn_interface,
+                "vpn_up": vpn_up_now,
                 "vpn_context": storage.context_to_dict(context),
                 "vpn_context_error": context_error,
                 "resources": resource_state,
                 "failures": failures,
+                "events": merged_events,
                 "counts": {
                     "vpn_only_v4": len(vpn_only_v4),
                     "vpn_only_v6": len(vpn_only_v6),
@@ -706,11 +864,15 @@ class KillSwitchService:
             }
         )
 
+        for event in transition_events:
+            publish_event(event)
+
         return {
             "vpn_context": storage.context_to_dict(context),
             "vpn_context_error": context_error,
             "resource_state": resource_state,
             "failures": failures,
+            "events": transition_events,
             "counts": {
                 "vpn_only_v4": len(vpn_only_v4),
                 "vpn_only_v6": len(vpn_only_v6),
@@ -732,14 +894,36 @@ class KillSwitchService:
             run(["systemctl", "is-active", WATCH_SERVICE_NAME], check=False).stdout.strip()
             or "unknown"
         )
+        blockpage_enabled = (
+            run(["systemctl", "is-enabled", BLOCKPAGE_SERVICE_NAME], check=False).stdout.strip()
+            or "unknown"
+        )
+        blockpage_active = (
+            run(["systemctl", "is-active", BLOCKPAGE_SERVICE_NAME], check=False).stdout.strip()
+            or "unknown"
+        )
+        tls_blockpage_enabled = (
+            run(["systemctl", "is-enabled", TLS_BLOCKPAGE_SERVICE_NAME], check=False).stdout.strip()
+            or "unknown"
+        )
+        tls_blockpage_active = (
+            run(["systemctl", "is-active", TLS_BLOCKPAGE_SERVICE_NAME], check=False).stdout.strip()
+            or "unknown"
+        )
         return {
             "config": config,
             "vpn_up": interface_is_up(config.vpn_interface),
             "nft_table_present": nft_table_exists(),
+            "nft_nat_table_present": nft_nat_table_exists(),
             "timer_enabled": enabled,
             "timer_active": active,
             "watch_enabled": watch_enabled,
             "watch_active": watch_active,
+            "blockpage_enabled": blockpage_enabled,
+            "blockpage_active": blockpage_active,
+            "tls_blockpage_enabled": tls_blockpage_enabled,
+            "tls_blockpage_active": tls_blockpage_active,
+            "local_ca": local_ca_status(),
             "state": state,
         }
 
@@ -850,11 +1034,18 @@ class KillSwitchService:
         if resource_state:
             expected_mode = str(resource_state.get("mode") or "vpn_only")
 
-        non_vpn_blocked = plain_res.returncode != 0 or plain_res.http_code == "000"
+        vpn_blocked = _probe_result_is_blocked(
+            returncode=vpn_res.returncode,
+            http_code=vpn_res.http_code,
+        )
+        non_vpn_blocked = _probe_result_is_blocked(
+            returncode=plain_res.returncode,
+            http_code=plain_res.http_code,
+        )
         if expected_mode == "hard_block":
-            passed = (not vpn_res.reachable) and non_vpn_blocked
+            passed = vpn_blocked and non_vpn_blocked
         else:
-            passed = vpn_res.reachable and non_vpn_blocked
+            passed = (not vpn_blocked) and non_vpn_blocked
 
         return {
             "resource": normalize_resource_name(resource.name),
@@ -866,6 +1057,8 @@ class KillSwitchService:
                 "http_code": vpn_res.http_code,
                 "stderr": vpn_res.stderr,
                 "reachable": vpn_res.reachable,
+                "blocked": vpn_blocked,
+                "block_page": _http_code_is_block_page(vpn_res.http_code),
             },
             "non_vpn_result": {
                 "interface": plain_res.interface,
@@ -873,6 +1066,7 @@ class KillSwitchService:
                 "http_code": plain_res.http_code,
                 "stderr": plain_res.stderr,
                 "blocked": non_vpn_blocked,
+                "block_page": _http_code_is_block_page(plain_res.http_code),
             },
             "passed": passed,
         }
@@ -898,16 +1092,18 @@ class KillSwitchService:
                 )
                 expected_mode = probe["expected_mode"]
                 vpn_reachable = bool(probe["vpn_result"]["reachable"])
+                vpn_blocked = bool(probe["vpn_result"].get("blocked", not vpn_reachable))
                 non_vpn_blocked = bool(probe["non_vpn_result"]["blocked"])
                 if expected_mode == "hard_block":
-                    access_ok = (not vpn_reachable) and non_vpn_blocked
+                    access_ok = vpn_blocked and non_vpn_blocked
                 else:
-                    access_ok = vpn_reachable and non_vpn_blocked
+                    access_ok = (not vpn_blocked) and non_vpn_blocked
                 checks.append(
                     {
                         "domain": probe["url"],
                         "expected_mode": expected_mode,
                         "vpn_reachable": vpn_reachable,
+                        "vpn_blocked": vpn_blocked,
                         "non_vpn_blocked": non_vpn_blocked,
                         "access_ok": access_ok,
                         "probe": probe,
@@ -931,16 +1127,18 @@ class KillSwitchService:
         )
         expected_mode = probe["expected_mode"]
         vpn_reachable = bool(probe["vpn_result"]["reachable"])
+        vpn_blocked = bool(probe["vpn_result"].get("blocked", not vpn_reachable))
         non_vpn_blocked = bool(probe["non_vpn_result"]["blocked"])
         if expected_mode == "hard_block":
-            access_ok = (not vpn_reachable) and non_vpn_blocked
+            access_ok = vpn_blocked and non_vpn_blocked
         else:
-            access_ok = vpn_reachable and non_vpn_blocked
+            access_ok = (not vpn_blocked) and non_vpn_blocked
         return {
             "resource": probe["resource"],
             "domain": probe["url"],
             "expected_mode": expected_mode,
             "vpn_reachable": vpn_reachable,
+            "vpn_blocked": vpn_blocked,
             "non_vpn_blocked": non_vpn_blocked,
             "access_ok": access_ok,
             "all_domains": False,
@@ -961,8 +1159,18 @@ class KillSwitchService:
             issues.append(f"watch_not_enabled({status['watch_enabled']})")
         if status["watch_active"] != "active":
             issues.append(f"watch_not_active({status['watch_active']})")
+        if status["blockpage_enabled"] != "enabled":
+            issues.append(f"blockpage_not_enabled({status['blockpage_enabled']})")
+        if status["blockpage_active"] != "active":
+            issues.append(f"blockpage_not_active({status['blockpage_active']})")
+        if status["tls_blockpage_enabled"] != "enabled":
+            issues.append(f"tls_blockpage_not_enabled({status['tls_blockpage_enabled']})")
+        if status["tls_blockpage_active"] != "active":
+            issues.append(f"tls_blockpage_not_active({status['tls_blockpage_active']})")
         if not status["nft_table_present"]:
             issues.append("nft_table_missing")
+        if not status["nft_nat_table_present"]:
+            issues.append("nft_nat_table_missing")
         if not status["vpn_up"]:
             issues.append("vpn_interface_down")
 
@@ -998,8 +1206,14 @@ class KillSwitchService:
                 "timer_active": status["timer_active"],
                 "watch_enabled": status["watch_enabled"],
                 "watch_active": status["watch_active"],
+                "blockpage_enabled": status["blockpage_enabled"],
+                "blockpage_active": status["blockpage_active"],
+                "tls_blockpage_enabled": status["tls_blockpage_enabled"],
+                "tls_blockpage_active": status["tls_blockpage_active"],
                 "nft_table_present": status["nft_table_present"],
+                "nft_nat_table_present": status["nft_nat_table_present"],
                 "vpn_up": status["vpn_up"],
+                "local_ca": status["local_ca"],
             },
             "probes": probes,
         }
@@ -1050,6 +1264,10 @@ class KillSwitchService:
             TIMER_PATH.unlink()
         if WATCH_SERVICE_PATH.exists():
             WATCH_SERVICE_PATH.unlink()
+        if BLOCKPAGE_SERVICE_PATH.exists():
+            BLOCKPAGE_SERVICE_PATH.unlink()
+        if TLS_BLOCKPAGE_SERVICE_PATH.exists():
+            TLS_BLOCKPAGE_SERVICE_PATH.unlink()
         run(["systemctl", "daemon-reload"], check=False)
 
         if purge:
@@ -1057,6 +1275,10 @@ class KillSwitchService:
                 storage.CONFIG_PATH.unlink()
             if storage.STATE_PATH.exists():
                 storage.STATE_PATH.unlink()
+            if CA_DIR.exists():
+                shutil.rmtree(CA_DIR)
+            if TLS_CERT_CACHE_DIR.exists():
+                shutil.rmtree(TLS_CERT_CACHE_DIR)
             if storage.CONFIG_PATH.parent.exists() and not any(storage.CONFIG_PATH.parent.iterdir()):
                 storage.CONFIG_PATH.parent.rmdir()
             if storage.STATE_PATH.parent.exists() and not any(storage.STATE_PATH.parent.iterdir()):

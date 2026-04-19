@@ -4,8 +4,12 @@ import argparse
 import json
 import sys
 
+from .blockpage import run_blockpage_server
+from .blockpage_tls import run_blockpage_tls_server
+from .constants import TLS_BLOCK_PAGE_PORT
 from .errors import CLIError
 from .gui import launch_gui
+from .mitm_ca import ensure_local_ca, local_ca_status, trust_local_ca
 from .service import KillSwitchService
 
 
@@ -17,7 +21,10 @@ def _print_probe(report: dict) -> None:
     vpn = report["vpn_result"]
     print(
         f"VPN ({vpn['interface']}): rc={vpn['returncode']} "
-        f"http={vpn['http_code']} reachable={str(vpn['reachable']).lower()}"
+        f"http={vpn['http_code']} "
+        f"reachable={str(vpn['reachable']).lower()} "
+        f"blocked={str(vpn.get('blocked', False)).lower()} "
+        f"block_page={str(vpn.get('block_page', False)).lower()}"
     )
     if vpn.get("stderr"):
         print(f"  stderr: {vpn['stderr']}")
@@ -25,7 +32,9 @@ def _print_probe(report: dict) -> None:
     plain = report["non_vpn_result"]
     print(
         f"Non-VPN ({plain['interface']}): rc={plain['returncode']} "
-        f"http={plain['http_code']} blocked={str(plain['blocked']).lower()}"
+        f"http={plain['http_code']} "
+        f"blocked={str(plain['blocked']).lower()} "
+        f"block_page={str(plain.get('block_page', False)).lower()}"
     )
     if plain.get("stderr"):
         print(f"  stderr: {plain['stderr']}")
@@ -338,6 +347,22 @@ def build_parser() -> argparse.ArgumentParser:
     gui_p.add_argument("--host", default="127.0.0.1")
     gui_p.add_argument("--port", type=int, default=8877)
 
+    blockpage_p = sub.add_parser("blockpage", help="Run local browser block-page server.")
+    blockpage_p.add_argument("--host", default="127.0.0.1")
+    blockpage_p.add_argument("--port", type=int, default=8765)
+
+    blockpage_tls_p = sub.add_parser("blockpage-tls", help="Run local TLS block-page server (HTTPS MITM).")
+    blockpage_tls_p.add_argument("--host", default="127.0.0.1")
+    blockpage_tls_p.add_argument("--port", type=int, default=TLS_BLOCK_PAGE_PORT)
+
+    ca_status_p = sub.add_parser("mitm-ca-status", help="Show local MITM CA status.")
+    ca_status_p.add_argument("--json", action="store_true", help="Output JSON.")
+
+    ca_init_p = sub.add_parser("mitm-ca-init", help="Create local MITM CA and cert cache.")
+    ca_init_p.add_argument("--common-name", default="VRKS Local MITM CA")
+
+    sub.add_parser("mitm-ca-trust", help="Install local MITM CA into system trust store.")
+
     api_p = sub.add_parser("api", help="Run REST API server with generated OpenAPI.")
     api_p.add_argument("--host", default="127.0.0.1")
     api_p.add_argument("--port", type=int, default=8787)
@@ -372,6 +397,13 @@ def main(argv: list[str] | None = None) -> int:
                 print("Warnings:")
                 for failure in report["failures"]:
                     print(f"  - {failure}")
+            if report.get("events"):
+                print("Events:")
+                for event in report["events"]:
+                    print(
+                        f"  - [{event.get('severity', 'normal')}] "
+                        f"{event.get('title', 'VRKS event')}: {event.get('message', '')}"
+                    )
             if args.self_test:
                 probe = svc.probe(
                     resource_name=None,
@@ -416,6 +448,13 @@ def main(argv: list[str] | None = None) -> int:
                 print("Warnings:")
                 for failure in report["failures"]:
                     print(f"  - {failure}")
+            if report.get("events"):
+                print("Events:")
+                for event in report["events"]:
+                    print(
+                        f"  - [{event.get('severity', 'normal')}] "
+                        f"{event.get('title', 'VRKS event')}: {event.get('message', '')}"
+                    )
             return 0
 
         if args.command == "status":
@@ -443,10 +482,16 @@ def main(argv: list[str] | None = None) -> int:
                     },
                     "vpn_up": status["vpn_up"],
                     "nft_table_present": status["nft_table_present"],
+                    "nft_nat_table_present": status["nft_nat_table_present"],
                     "timer_enabled": status["timer_enabled"],
                     "timer_active": status["timer_active"],
                     "watch_enabled": status["watch_enabled"],
                     "watch_active": status["watch_active"],
+                    "blockpage_enabled": status["blockpage_enabled"],
+                    "blockpage_active": status["blockpage_active"],
+                    "tls_blockpage_enabled": status["tls_blockpage_enabled"],
+                    "tls_blockpage_active": status["tls_blockpage_active"],
+                    "local_ca": status["local_ca"],
                     "state": status["state"],
                 }
                 print(json.dumps(printable, indent=2))
@@ -454,8 +499,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"VPN interface: {status['config'].vpn_interface}")
                 print(f"VPN UP: {str(status['vpn_up']).lower()}")
                 print(f"nft table: {str(status['nft_table_present']).lower()}")
+                print(f"nft nat table: {str(status['nft_nat_table_present']).lower()}")
                 print(f"timer: {status['timer_enabled']} / {status['timer_active']}")
                 print(f"watch: {status['watch_enabled']} / {status['watch_active']}")
+                print(
+                    f"blockpage: {status['blockpage_enabled']} / {status['blockpage_active']}"
+                )
+                print(
+                    f"blockpage-tls: {status['tls_blockpage_enabled']} / {status['tls_blockpage_active']}"
+                )
+                print(f"local-ca: exists={str(status['local_ca']['exists']).lower()}")
                 print("Resources:")
                 for resource in status["config"].resources:
                     print(
@@ -488,6 +541,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Run apply: {str(report['applied']).lower()}")
             if report["apply_report"] is not None:
                 print(f"Counts: {report['apply_report']['counts']}")
+                if report["apply_report"].get("events"):
+                    print("Events:")
+                    for event in report["apply_report"]["events"]:
+                        print(
+                            f"  - [{event.get('severity', 'normal')}] "
+                            f"{event.get('title', 'VRKS event')}: {event.get('message', '')}"
+                        )
             return 0
 
         if args.command == "discover":
@@ -662,6 +722,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"Access check resource={report['resource']} mode={report['expected_mode']} "
                     f"vpn_reachable={str(report['vpn_reachable']).lower()} "
+                    f"vpn_blocked={str(report.get('vpn_blocked', False)).lower()} "
                     f"non_vpn_blocked={str(report['non_vpn_blocked']).lower()} "
                     f"result={'PASS' if report['access_ok'] else 'FAIL'}"
                 )
@@ -712,7 +773,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"timer_active={report['checks']['timer_active']} "
                 f"watch_enabled={report['checks']['watch_enabled']} "
                 f"watch_active={report['checks']['watch_active']} "
+                f"blockpage_enabled={report['checks']['blockpage_enabled']} "
+                f"blockpage_active={report['checks']['blockpage_active']} "
+                f"tls_blockpage_enabled={report['checks']['tls_blockpage_enabled']} "
+                f"tls_blockpage_active={report['checks']['tls_blockpage_active']} "
+                f"local_ca_exists={str(report['checks']['local_ca']['exists']).lower()} "
                 f"nft={str(report['checks']['nft_table_present']).lower()} "
+                f"nft_nat={str(report['checks']['nft_nat_table_present']).lower()} "
                 f"vpn_up={str(report['checks']['vpn_up']).lower()}"
             )
             for issue in report["issues"]:
@@ -736,6 +803,38 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "gui":
             launch_gui(svc, host=args.host, port=args.port)
+            return 0
+
+        if args.command == "blockpage":
+            run_blockpage_server(host=args.host, port=args.port)
+            return 0
+
+        if args.command == "blockpage-tls":
+            run_blockpage_tls_server(host=args.host, port=args.port)
+            return 0
+
+        if args.command == "mitm-ca-status":
+            status = local_ca_status()
+            if args.json:
+                print(json.dumps(status, indent=2))
+            else:
+                print(f"exists: {str(status['exists']).lower()}")
+                print(f"ca dir: {status['ca_dir']}")
+                print(f"ca cert: {status['ca_cert_path']}")
+                print(f"tls cert cache: {status['tls_cert_cache_dir']}")
+            return 0
+
+        if args.command == "mitm-ca-init":
+            report = ensure_local_ca(common_name=args.common_name)
+            print(
+                f"Local CA {'created' if report['created'] else 'already exists'}: "
+                f"{report['ca_cert_path']}"
+            )
+            return 0
+
+        if args.command == "mitm-ca-trust":
+            report = trust_local_ca()
+            print(f"CA trusted via {report['method']}: {report['target']}")
             return 0
 
         if args.command == "api":

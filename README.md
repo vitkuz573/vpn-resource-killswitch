@@ -16,6 +16,7 @@ Core logic is generic; service-specific behavior comes from external presets.
 - Works with any VPN provider because enforcement is interface-based (`tun`, `wg`, etc.).
 - Includes both CLI and web GUI.
 - Instant reaction path: realtime `watch` service + NetworkManager dispatcher + periodic timer.
+- Transition notifications: desktop/syslog alerts when a resource enters `hard_block` or is restored.
 
 ## Architecture
 
@@ -24,9 +25,13 @@ Core logic is generic; service-specific behavior comes from external presets.
 - `vrks/service.py`: orchestration layer (setup/apply/probe/resource management).
 - `vrks/network.py`: interface detection, DNS resolve, egress country/server lookup, probe.
 - `vrks/discovery.py`: domain crawler/extractor for automatic coverage expansion.
+- `vrks/notifications.py`: cross-platform notification dispatch (`linux`/`macOS`/`windows` + logger fallback).
+- `vrks/blockpage.py`: local HTTP block page server (`451`).
+- `vrks/blockpage_tls.py`: local HTTPS block page server with SNI-based certificates.
+- `vrks/mitm_ca.py`: local CA lifecycle and per-domain certificate issuance for HTTPS block page.
 - `vrks/firewall.py`: nftables rule generation and apply.
 - `vrks/storage.py`: config/state persistence.
-- `vrks/runtime.py`: runtime install (`/usr/local/bin/vrks`) + systemd timer/watch/dispatcher integration.
+- `vrks/runtime.py`: runtime install (`/usr/local/bin/vrks`) + systemd timer/watch/dispatcher/blockpage services.
 
 ## Quick start
 
@@ -84,6 +89,43 @@ sudo python3 vrks.py watch
 
 `watch` usually runs as systemd service and reapplies rules instantly on route/link/address changes.
 
+## Notifications
+
+When kill-switch state changes, VRKS emits events:
+- Resource moved to `hard_block` (critical)
+- Resource restored to `vpn_only`
+- VPN interface down/up transitions
+
+Delivery:
+- Desktop notification backends:
+  - Linux: `notify-send` via desktop DBus session
+  - macOS: `osascript` notification
+  - Windows: PowerShell balloon notification
+- Syslog/journal fallback (`logger -t vrks`)
+
+Events are also stored in state (`/var/lib/vpn-resource-killswitch/state.json`, key: `events`).
+
+## Browser Block Page (HTTP + HTTPS)
+
+VRKS runs two local block-page services and redirects blocked traffic to them:
+
+- HTTP service: `vpn-resource-killswitch-blockpage.service` (`http://127.0.0.1:8765`)
+- HTTPS service: `vpn-resource-killswitch-blockpage-tls.service` (`https://127.0.0.1:8766`)
+- Block response code: `451`
+
+For full HTTPS block page (without browser certificate warnings), initialize and trust local CA:
+
+```bash
+sudo python3 vrks.py mitm-ca-init
+sudo python3 vrks.py mitm-ca-trust
+sudo python3 vrks.py mitm-ca-status
+```
+
+Notes:
+- Blocked HTTP traffic always renders VRKS block page.
+- Blocked HTTPS traffic renders VRKS block page via local MITM TLS endpoint.
+- If local CA is not trusted yet, browsers will show TLS warning for blocked HTTPS pages.
+
 ## Presets
 
 `antigravity` ships as built-in preset (data file, not hardcoded logic).
@@ -131,10 +173,10 @@ Capture real network hosts (DNS + TLS SNI + HTTP Host) while any app runs:
 
 ```bash
 sudo python3 vrks.py runtime-discover \
-  --cmd "/tmp/antigravity_ide/Antigravity/antigravity" \
+  --cmd "/opt/myapp/bin/myapp --profile test" \
   --run-as-user "$SUDO_USER" \
   --duration 60 \
-  --include "antigravity|googleapis|google\\.com|gvt1|run\\.app" \
+  --include "service|api|cdn|googleapis|cloudfront" \
   --exclude "microsoft\\.com|cloudapp\\.azure\\.com|localhost|127\\.0\\.0\\.1"
 ```
 
@@ -143,10 +185,10 @@ Auto-merge runtime-discovered domains into resource profile:
 ```bash
 sudo python3 vrks.py resource-runtime-autofill \
   --resource antigravity \
-  --cmd "/tmp/antigravity_ide/Antigravity/antigravity" \
+  --cmd "/opt/myapp/bin/myapp --profile test" \
   --run-as-user "$SUDO_USER" \
   --duration 60 \
-  --include "antigravity|googleapis|google\\.com|gvt1|run\\.app" \
+  --include "service|api|cdn|googleapis|cloudfront" \
   --exclude "microsoft\\.com|cloudapp\\.azure\\.com|localhost|127\\.0\\.0\\.1"
 ```
 
@@ -162,6 +204,8 @@ sudo python3 vrks.py access-check --resource antigravity --all-domains
 Result is PASS only when effective mode behavior is correct:
 - `vpn_only`: reachable via VPN and blocked outside VPN
 - `hard_block`: blocked via VPN and outside VPN
+
+Blocked probe result includes firewall-reject, TLS failure, or HTTP `451` block page response.
 
 ## REST API + OpenAPI
 
@@ -192,6 +236,9 @@ Main endpoints:
 - `POST /v1/probe`
 - `POST /v1/verify`
 - `POST /v1/apply`
+- `GET /v1/mitm/ca-status`
+- `POST /v1/mitm/ca-init`
+- `POST /v1/mitm/ca-trust`
 
 Arch dependencies:
 

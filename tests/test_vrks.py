@@ -11,7 +11,7 @@ from vrks.firewall import build_nft_rules
 from vrks.models import AppConfig, ResourcePolicy, ResourceProfile, VpnContext
 from vrks.network import normalize_domain, normalize_domains, resolve_domains
 from vrks.presets import get_preset, list_presets
-from vrks.service import KillSwitchService, _policy_match
+from vrks.service import KillSwitchService, _build_transition_events, _policy_match
 from vrks.traffic import extract_domains_from_capture, filter_domains, parse_command
 
 
@@ -45,6 +45,10 @@ class NftBuildTests(unittest.TestCase):
         self.assertIn('oifname != "amn0"', script)
         self.assertIn("set vpn_only_v4", script)
         self.assertIn("set hard_block_v4", script)
+        self.assertIn("table ip vpn_resource_killswitch_nat", script)
+        self.assertIn("type nat hook output", script)
+        self.assertIn("tcp dport 80 redirect", script)
+        self.assertIn("tcp dport 443 redirect", script)
 
 
 class ResolveTests(unittest.TestCase):
@@ -246,6 +250,51 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("context_keyword_blocked", reason)
 
 
+class NotificationEventTests(unittest.TestCase):
+    def test_build_transition_events_hard_block_and_restore(self) -> None:
+        first = _build_transition_events(
+            previous_resources={},
+            current_resources={"svc": {"mode": "hard_block", "reason": "country_not_allowed"}},
+            vpn_interface="amn0",
+            previous_vpn_up=True,
+            current_vpn_up=True,
+        )
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]["kind"], "resource_hard_block")
+        self.assertEqual(first[0]["resource"], "svc")
+
+        second = _build_transition_events(
+            previous_resources={"svc": {"mode": "hard_block"}},
+            current_resources={"svc": {"mode": "vpn_only", "reason": "policy_match"}},
+            vpn_interface="amn0",
+            previous_vpn_up=True,
+            current_vpn_up=True,
+        )
+        self.assertEqual(len(second), 1)
+        self.assertEqual(second[0]["kind"], "resource_vpn_only_restored")
+
+    def test_build_transition_events_vpn_down_up(self) -> None:
+        down = _build_transition_events(
+            previous_resources={},
+            current_resources={},
+            vpn_interface="amn0",
+            previous_vpn_up=True,
+            current_vpn_up=False,
+        )
+        self.assertEqual(len(down), 1)
+        self.assertEqual(down[0]["kind"], "vpn_down")
+
+        up = _build_transition_events(
+            previous_resources={},
+            current_resources={},
+            vpn_interface="amn0",
+            previous_vpn_up=False,
+            current_vpn_up=True,
+        )
+        self.assertEqual(len(up), 1)
+        self.assertEqual(up[0]["kind"], "vpn_up")
+
+
 class PresetTests(unittest.TestCase):
     def test_preset_catalog_has_antigravity(self) -> None:
         names = [item.name for item in list_presets()]
@@ -293,6 +342,26 @@ class AccessCheckTests(unittest.TestCase):
         self.assertFalse(report["access_ok"])
         self.assertEqual(report["domains_checked"], 2)
         self.assertEqual(report["failed_domains"], ["https://b.example.com/"])
+
+    @mock.patch.object(KillSwitchService, "probe")
+    def test_access_check_hard_block_accepts_451_block_page(self, mocked_probe: mock.Mock) -> None:
+        mocked_probe.return_value = {
+            "resource": "svc",
+            "url": "https://blocked.example.com/",
+            "expected_mode": "hard_block",
+            "vpn_result": {"reachable": True, "blocked": True},
+            "non_vpn_result": {"blocked": True},
+            "passed": True,
+        }
+
+        report = KillSwitchService().access_check(
+            resource_name="svc",
+            domain="blocked.example.com",
+            timeout=8,
+            all_domains=False,
+        )
+        self.assertTrue(report["access_ok"])
+        self.assertTrue(report["vpn_blocked"])
 
 
 if __name__ == "__main__":

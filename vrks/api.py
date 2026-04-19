@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .errors import CLIError
+from .mitm_ca import ensure_local_ca, local_ca_status, trust_local_ca
 from .service import KillSwitchService
 
 
@@ -116,15 +117,25 @@ class SetupRequest(BaseModel):
     install_bin: bool = False
 
 
+class MitmCaInitRequest(BaseModel):
+    common_name: str = Field(default="VRKS Local MITM CA", min_length=1, max_length=120)
+
+
 def _serialize_status(service: KillSwitchService, status: dict[str, Any]) -> dict[str, Any]:
     return {
         "config": asdict(status["config"]),
         "vpn_up": status["vpn_up"],
         "nft_table_present": status["nft_table_present"],
+        "nft_nat_table_present": status["nft_nat_table_present"],
         "timer_enabled": status["timer_enabled"],
         "timer_active": status["timer_active"],
         "watch_enabled": status["watch_enabled"],
         "watch_active": status["watch_active"],
+        "blockpage_enabled": status["blockpage_enabled"],
+        "blockpage_active": status["blockpage_active"],
+        "tls_blockpage_enabled": status["tls_blockpage_enabled"],
+        "tls_blockpage_active": status["tls_blockpage_active"],
+        "local_ca": status["local_ca"],
         "state": status["state"],
         "resources": service.list_resources(),
     }
@@ -135,7 +146,7 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
     app = FastAPI(
         title="VPN Resource Kill-Switch API",
         description="REST API for managing VPN resource kill-switch policies and checks.",
-        version="1.4.0",
+        version="1.5.0",
     )
 
     def _run(handler):
@@ -336,6 +347,18 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
             return {"ok": True}
 
         return _run(_handler)
+
+    @app.get("/v1/mitm/ca-status")
+    def mitm_ca_status() -> dict[str, Any]:
+        return _run(local_ca_status)
+
+    @app.post("/v1/mitm/ca-init")
+    def mitm_ca_init(payload: MitmCaInitRequest) -> dict[str, Any]:
+        return _run(lambda: ensure_local_ca(common_name=payload.common_name))
+
+    @app.post("/v1/mitm/ca-trust")
+    def mitm_ca_trust() -> dict[str, Any]:
+        return _run(trust_local_ca)
 
     return app
 
