@@ -33,6 +33,13 @@ Authenticated endpoints:
 - `POST /api/control/verify`
 - `GET /api/control/presets`
 - `POST /api/control/presets`
+- `GET /api/repl/sessions`
+- `POST /api/repl/sessions`
+- `GET /api/repl/sessions/:id`
+- `DELETE /api/repl/sessions/:id`
+- `POST /api/repl/sessions/:id/input`
+- `POST /api/repl/sessions/:id/resize`
+- `GET /api/repl/sessions/:id/stream` (SSE)
 
 Auth/admin endpoints:
 
@@ -55,6 +62,7 @@ Auth/admin endpoints:
 - `/profiles` — resource profile inventory, filtering, edit/remove
 - `/presets` — preset catalog and apply workflow
 - `/imports` — import/export/validate JSON payloads
+- `/repl` — full PTY terminal (`xterm` frontend + `node-pty` backend)
 - `/users` — user management (ADMIN only)
 
 ## Environment

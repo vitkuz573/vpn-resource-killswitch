@@ -10,7 +10,7 @@ type Props = {
 type NavItem = {
   href: string;
   label: string;
-  minRole?: "ADMIN";
+  minRole?: "ADMIN" | "OPERATOR";
 };
 
 const ITEMS: NavItem[] = [
@@ -18,8 +18,15 @@ const ITEMS: NavItem[] = [
   { href: "/profiles", label: "Profiles" },
   { href: "/presets", label: "Presets" },
   { href: "/imports", label: "Imports" },
+  { href: "/repl", label: "REPL", minRole: "OPERATOR" },
   { href: "/users", label: "Users", minRole: "ADMIN" },
 ];
+
+const ROLE_LEVEL: Record<string, number> = {
+  VIEWER: 1,
+  OPERATOR: 2,
+  ADMIN: 3,
+};
 
 export function ConsoleNav({ role }: Props) {
   const pathname = usePathname();
@@ -28,7 +35,9 @@ export function ConsoleNav({ role }: Props) {
     if (!item.minRole) {
       return true;
     }
-    return role === item.minRole;
+    const currentLevel = ROLE_LEVEL[role] || 0;
+    const requiredLevel = ROLE_LEVEL[item.minRole] || 0;
+    return currentLevel >= requiredLevel;
   });
 
   return (
