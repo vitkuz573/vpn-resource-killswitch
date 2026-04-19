@@ -1435,6 +1435,59 @@ class KillSwitchService:
         ensure_root()
         delete_nft_table()
 
+    def runtime_manage(self, *, unit: str, action: str) -> dict[str, Any]:
+        ensure_root()
+
+        unit_map = {
+            "timer": [TIMER_NAME],
+            "watch": [WATCH_SERVICE_NAME],
+            "blockpage": [BLOCKPAGE_SERVICE_NAME],
+            "blockpage-tls": [TLS_BLOCKPAGE_SERVICE_NAME],
+            "all": [
+                TIMER_NAME,
+                WATCH_SERVICE_NAME,
+                BLOCKPAGE_SERVICE_NAME,
+                TLS_BLOCKPAGE_SERVICE_NAME,
+            ],
+        }
+        action_map: dict[str, list[str]] = {
+            "start": ["start"],
+            "stop": ["stop"],
+            "restart": ["restart"],
+            "enable": ["enable"],
+            "disable": ["disable"],
+            "enable-now": ["enable", "--now"],
+            "disable-now": ["disable", "--now"],
+        }
+
+        target_unit = unit.strip().lower()
+        target_action = action.strip().lower()
+        if target_unit not in unit_map:
+            raise CLIError(
+                "Invalid runtime unit. Use one of: timer, watch, blockpage, blockpage-tls, all."
+            )
+        if target_action not in action_map:
+            raise CLIError(
+                "Invalid runtime action. Use one of: "
+                "start, stop, restart, enable, disable, enable-now, disable-now."
+            )
+
+        systemctl_args = action_map[target_action]
+        units = unit_map[target_unit]
+        commands: list[list[str]] = []
+
+        for service_name in units:
+            command = ["systemctl", *systemctl_args, service_name]
+            run(command, check=True)
+            commands.append(command)
+
+        return {
+            "unit": target_unit,
+            "action": target_action,
+            "units": units,
+            "commands": [" ".join(cmd) for cmd in commands],
+        }
+
     def teardown(self, *, purge: bool, remove_bin: bool) -> None:
         ensure_root()
         delete_nft_table()

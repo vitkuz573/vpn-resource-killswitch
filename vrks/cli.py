@@ -380,6 +380,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum seconds between apply runs when many events arrive.",
     )
 
+    runtime_manage_p = sub.add_parser("runtime-manage", help="Manage VRKS runtime systemd units.")
+    runtime_manage_p.add_argument(
+        "--unit",
+        required=True,
+        choices=["timer", "watch", "blockpage", "blockpage-tls", "all"],
+        help="Target unit group.",
+    )
+    runtime_manage_p.add_argument(
+        "--action",
+        required=True,
+        choices=["start", "stop", "restart", "enable", "disable", "enable-now", "disable-now"],
+        help="systemctl action for target unit(s).",
+    )
+    runtime_manage_p.add_argument("--json", action="store_true", help="Output JSON.")
+
     disable_p = sub.add_parser("disable", help="Disable nft table now.")
 
     teardown_p = sub.add_parser("teardown", help="Remove systemd units and nft table.")
@@ -878,6 +893,19 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "watch":
             return svc.watch(debounce_seconds=args.debounce)
+
+        if args.command == "runtime-manage":
+            report = svc.runtime_manage(unit=args.unit, action=args.action)
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(
+                    f"Runtime manage: unit={report['unit']} action={report['action']} "
+                    f"targets={len(report['units'])}"
+                )
+                for command in report["commands"]:
+                    print(f"  - {command}")
+            return 0
 
         if args.command == "disable":
             svc.disable()

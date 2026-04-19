@@ -9,6 +9,12 @@ from urllib.error import URLError
 from unittest import mock
 
 from vrks.blockpage import _humanize_mode, _humanize_reason
+from vrks.constants import (
+    BLOCKPAGE_SERVICE_NAME,
+    TIMER_NAME,
+    TLS_BLOCKPAGE_SERVICE_NAME,
+    WATCH_SERVICE_NAME,
+)
 from vrks.discovery import discover_domains
 from vrks.errors import CLIError
 from vrks.firewall import build_nft_rules
@@ -327,6 +333,38 @@ class NotificationEventTests(unittest.TestCase):
         )
         self.assertEqual(len(up), 1)
         self.assertEqual(up[0]["kind"], "vpn_up")
+
+
+class RuntimeManageTests(unittest.TestCase):
+    @mock.patch("vrks.service.ensure_root")
+    @mock.patch("vrks.service.run")
+    def test_runtime_manage_enable_now_all_units(
+        self, mocked_run: mock.Mock, mocked_root: mock.Mock
+    ) -> None:
+        _ = mocked_root
+        report = KillSwitchService().runtime_manage(unit="all", action="enable-now")
+        self.assertEqual(report["unit"], "all")
+        self.assertEqual(report["action"], "enable-now")
+        self.assertEqual(
+            report["units"],
+            [TIMER_NAME, WATCH_SERVICE_NAME, BLOCKPAGE_SERVICE_NAME, TLS_BLOCKPAGE_SERVICE_NAME],
+        )
+        commands = [call.args[0] for call in mocked_run.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                ["systemctl", "enable", "--now", TIMER_NAME],
+                ["systemctl", "enable", "--now", WATCH_SERVICE_NAME],
+                ["systemctl", "enable", "--now", BLOCKPAGE_SERVICE_NAME],
+                ["systemctl", "enable", "--now", TLS_BLOCKPAGE_SERVICE_NAME],
+            ],
+        )
+
+    @mock.patch("vrks.service.ensure_root")
+    def test_runtime_manage_invalid_unit_raises(self, mocked_root: mock.Mock) -> None:
+        _ = mocked_root
+        with self.assertRaises(CLIError):
+            KillSwitchService().runtime_manage(unit="unknown", action="start")
 
 
 class PresetTests(unittest.TestCase):

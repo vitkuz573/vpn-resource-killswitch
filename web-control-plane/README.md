@@ -31,6 +31,7 @@ Authenticated endpoints:
 - `POST /api/control/resources/validate`
 - `POST /api/control/apply`
 - `POST /api/control/verify`
+- `POST /api/control/runtime`
 - `GET /api/control/presets`
 - `POST /api/control/presets`
 - `GET /api/repl/sessions`

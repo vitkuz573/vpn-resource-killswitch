@@ -97,6 +97,14 @@ sudo python3 vrks.py watch
 
 `watch` usually runs as systemd service and reapplies rules instantly on route/link/address changes.
 
+Runtime unit management:
+
+```bash
+sudo python3 vrks.py runtime-manage --unit all --action restart
+sudo python3 vrks.py runtime-manage --unit watch --action disable-now
+sudo python3 vrks.py runtime-manage --unit blockpage-tls --action enable-now
+```
+
 ## Notifications
 
 When kill-switch state changes, VRKS emits events:
