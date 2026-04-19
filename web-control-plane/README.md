@@ -23,9 +23,12 @@ Modern authenticated control plane for VRKS.
 Authenticated endpoints:
 
 - `GET /api/control/status`
-- `GET /api/control/resources`
+- `GET /api/control/resources?q=&sort=&policy=&page=&pageSize=`
 - `POST /api/control/resources`
-- `DELETE /api/control/resources?name=<resource>`
+- `DELETE /api/control/resources?name=<resource>&runApply=true&runVerify=false&verifyTimeout=8`
+- `GET /api/control/resources/export`
+- `POST /api/control/resources/import`
+- `POST /api/control/resources/validate`
 - `POST /api/control/apply`
 - `POST /api/control/verify`
 - `GET /api/control/presets`
@@ -36,6 +39,23 @@ Auth/admin endpoints:
 - `GET /api/auth/bootstrap`
 - `POST /api/auth/register`
 - `GET /api/auth/users` (ADMIN)
+
+### Profile management features
+
+- Server-side filtering/search/sort/pagination for resource list.
+- Strong profile validation and normalization (domains, country codes, policy conflicts).
+- Save/remove with optional `runApply` and optional post-check `runVerify`.
+- JSON export with SHA-256 fingerprint.
+- Bulk import in `merge` or `replace_all` mode.
+- Dry-run style validation endpoint for JSON payload before import.
+
+## UI routes
+
+- `/overview` — runtime health + apply/verify operations
+- `/profiles` — resource profile inventory, filtering, edit/remove
+- `/presets` — preset catalog and apply workflow
+- `/imports` — import/export/validate JSON payloads
+- `/users` — user management (ADMIN only)
 
 ## Environment
 
