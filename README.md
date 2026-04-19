@@ -14,7 +14,7 @@ Core logic is generic; service-specific behavior comes from external presets.
   - `blocked_context_keywords` (substring deny-list over VPN context: country/region/city/org/isp/domain/ip)
 - If policy mismatch happens, resource is hard-blocked on all interfaces.
 - Works with any VPN provider because enforcement is interface-based (`tun`, `wg`, etc.).
-- Includes both CLI and web GUI.
+- Includes CLI, legacy Python GUI, and modern Next.js control plane.
 - Instant reaction path: realtime `watch` service + NetworkManager dispatcher + periodic timer.
 - Transition notifications: desktop/syslog alerts when a resource enters `hard_block` or is restored.
 
@@ -32,6 +32,7 @@ Core logic is generic; service-specific behavior comes from external presets.
 - `vrks/firewall.py`: nftables rule generation and apply.
 - `vrks/storage.py`: config/state persistence.
 - `vrks/runtime.py`: runtime install (`/usr/local/bin/vrks`) + systemd timer/watch/dispatcher/blockpage services.
+- `web-control-plane/`: Next.js + TypeScript + Tailwind authenticated control plane (Auth.js + Prisma RBAC).
 
 ## Quick start
 
@@ -79,6 +80,22 @@ sudo python3 vrks.py gui --host 127.0.0.1 --port 8877
 ```
 
 Then open `http://127.0.0.1:8877`.
+
+## Next.js Control Plane (Recommended)
+
+Full auth-enabled control plane:
+
+```bash
+cd /home/vitaly/projects/vpn-resource-killswitch/web-control-plane
+cp .env.example .env
+npm install
+npm run prisma:generate
+npm run prisma:push
+ADMIN_EMAIL=admin@vrks.local ADMIN_PASSWORD='ChangeMe_12345' ADMIN_NAME='VRKS Admin' npm run seed:admin
+npm run dev
+```
+
+Open `http://127.0.0.1:3000/login`.
 
 ## Verify / Watch
 
