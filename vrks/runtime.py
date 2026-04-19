@@ -53,7 +53,7 @@ Description=Periodic refresh for VPN Resource Kill-Switch rules
 
 [Timer]
 OnBootSec=45s
-OnUnitActiveSec=3m
+OnUnitActiveSec=30s
 RandomizedDelaySec=30s
 Persistent=true
 Unit={SERVICE_NAME}
@@ -68,9 +68,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart={exec_path} watch
+ExecStart={exec_path} watch --debounce 0.2
 Restart=always
-RestartSec=1
+RestartSec=0.5
 
 [Install]
 WantedBy=multi-user.target

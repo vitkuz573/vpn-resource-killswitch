@@ -33,6 +33,7 @@ class AccessCheckRequest(BaseModel):
     resource_name: str
     domain: str | None = None
     timeout: int = Field(default=8, ge=1, le=60)
+    all_domains: bool = False
 
 
 class VerifyRequest(BaseModel):
@@ -50,6 +51,57 @@ class BootstrapRequest(BaseModel):
     vpn_interface: str | None = None
     install_bin: bool = False
     timeout: int = Field(default=8, ge=1, le=60)
+    autodiscover: bool = True
+    discovery_depth: int = Field(default=2, ge=0, le=5)
+    include_external: bool = False
+
+
+class DiscoverRequest(BaseModel):
+    resource_name: str | None = None
+    preset_name: str | None = None
+    max_depth: int = Field(default=2, ge=0, le=5)
+    include_external: bool = False
+    dns_check: bool = True
+
+
+class AutofillRequest(BaseModel):
+    max_depth: int = Field(default=2, ge=0, le=5)
+    include_external: bool = False
+    dns_check: bool = True
+    run_apply: bool = True
+
+
+class SyncRequest(BaseModel):
+    resources: list[str] | None = None
+    max_depth: int = Field(default=2, ge=0, le=5)
+    include_external: bool = False
+    dns_check: bool = True
+    run_apply: bool = True
+    verify_timeout: int = Field(default=8, ge=1, le=60)
+    check_access: bool = True
+    access_timeout: int = Field(default=8, ge=1, le=60)
+    access_all_domains: bool = False
+
+
+class RuntimeDiscoverRequest(BaseModel):
+    command: str = Field(..., min_length=1)
+    command_user: str | None = None
+    duration: int = Field(default=60, ge=5, le=1800)
+    startup_delay: float = Field(default=2.0, ge=0, le=300)
+    capture_interface: str = "any"
+    include_patterns: list[str] | None = None
+    exclude_patterns: list[str] | None = None
+
+
+class RuntimeAutofillRequest(BaseModel):
+    command: str = Field(..., min_length=1)
+    command_user: str | None = None
+    duration: int = Field(default=60, ge=5, le=1800)
+    startup_delay: float = Field(default=2.0, ge=0, le=300)
+    capture_interface: str = "any"
+    include_patterns: list[str] | None = None
+    exclude_patterns: list[str] | None = None
+    run_apply: bool = True
 
 
 class SetupRequest(BaseModel):
@@ -83,7 +135,7 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
     app = FastAPI(
         title="VPN Resource Kill-Switch API",
         description="REST API for managing VPN resource kill-switch policies and checks.",
-        version="1.2.1",
+        version="1.4.0",
     )
 
     def _run(handler):
@@ -124,6 +176,9 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
                 vpn_interface=payload.vpn_interface,
                 install_bin=payload.install_bin,
                 timeout=payload.timeout,
+                autodiscover=payload.autodiscover,
+                discovery_depth=payload.discovery_depth,
+                include_external=payload.include_external,
             )
         )
 
@@ -134,6 +189,85 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
     @app.post("/v1/presets/{name}/apply")
     def apply_preset(name: str, payload: PresetApplyRequest) -> dict[str, Any]:
         return _run(lambda: svc.apply_preset(name=name, replace=payload.replace, run_apply=payload.run_apply))
+
+    @app.post("/v1/discover")
+    def discover(payload: DiscoverRequest) -> dict[str, Any]:
+        def _handler():
+            if bool(payload.resource_name) == bool(payload.preset_name):
+                raise CLIError("Set exactly one of resource_name or preset_name.")
+            if payload.resource_name:
+                return svc.discover_resource_domains(
+                    resource_name=payload.resource_name,
+                    max_depth=payload.max_depth,
+                    include_external=payload.include_external,
+                    dns_check=payload.dns_check,
+                )
+            return svc.discover_preset_domains(
+                preset_name=str(payload.preset_name),
+                max_depth=payload.max_depth,
+                include_external=payload.include_external,
+                dns_check=payload.dns_check,
+            )
+
+        return _run(_handler)
+
+    @app.post("/v1/resources/{name}/autofill")
+    def resource_autofill(name: str, payload: AutofillRequest) -> dict[str, Any]:
+        return _run(
+            lambda: svc.autofill_resource_domains(
+                resource_name=name,
+                max_depth=payload.max_depth,
+                include_external=payload.include_external,
+                dns_check=payload.dns_check,
+                run_apply=payload.run_apply,
+            )
+        )
+
+    @app.post("/v1/sync")
+    def sync(payload: SyncRequest) -> dict[str, Any]:
+        return _run(
+            lambda: svc.sync(
+                resources=payload.resources,
+                max_depth=payload.max_depth,
+                include_external=payload.include_external,
+                dns_check=payload.dns_check,
+                run_apply=payload.run_apply,
+                verify_timeout=payload.verify_timeout,
+                check_access=payload.check_access,
+                access_timeout=payload.access_timeout,
+                access_all_domains=payload.access_all_domains,
+            )
+        )
+
+    @app.post("/v1/runtime/discover")
+    def runtime_discover(payload: RuntimeDiscoverRequest) -> dict[str, Any]:
+        return _run(
+            lambda: svc.runtime_discover(
+                command=payload.command,
+                command_user=payload.command_user,
+                duration=payload.duration,
+                startup_delay=payload.startup_delay,
+                capture_interface=payload.capture_interface,
+                include_patterns=payload.include_patterns,
+                exclude_patterns=payload.exclude_patterns,
+            )
+        )
+
+    @app.post("/v1/resources/{name}/runtime-autofill")
+    def runtime_autofill(name: str, payload: RuntimeAutofillRequest) -> dict[str, Any]:
+        return _run(
+            lambda: svc.runtime_autofill_resource(
+                resource_name=name,
+                command=payload.command,
+                command_user=payload.command_user,
+                duration=payload.duration,
+                startup_delay=payload.startup_delay,
+                capture_interface=payload.capture_interface,
+                include_patterns=payload.include_patterns,
+                exclude_patterns=payload.exclude_patterns,
+                run_apply=payload.run_apply,
+            )
+        )
 
     @app.get("/v1/resources")
     def list_resources() -> list[dict[str, Any]]:
@@ -187,6 +321,7 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
                 resource_name=payload.resource_name,
                 domain=payload.domain,
                 timeout=payload.timeout,
+                all_domains=payload.all_domains,
             )
         )
 

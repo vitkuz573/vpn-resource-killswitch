@@ -11,16 +11,34 @@ from .models import ProbeResult, VpnContext
 from .system import run
 
 COUNTRY_CODE_RE = re.compile(r"^[A-Za-z]{2}$")
+DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9-]{1,63}$")
 
 
 def normalize_domain(domain: str) -> str:
-    value = domain.strip().lower().rstrip(".")
+    value = domain.strip().rstrip(".")
     if not value:
         raise CLIError("Domain cannot be empty.")
-    if len(value) > 253:
-        raise CLIError(f"Domain too long: {value!r}")
     if any(ch.isspace() for ch in value):
         raise CLIError(f"Invalid domain: {value!r}")
+    if any(ch in value for ch in ("/", "\\", ":", "?", "#", "@")):
+        raise CLIError(f"Invalid domain: {value!r}")
+
+    try:
+        value = value.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise CLIError(f"Invalid domain: {value!r}") from exc
+
+    if len(value) > 253:
+        raise CLIError(f"Domain too long: {value!r}")
+
+    labels = value.split(".")
+    if len(labels) < 2:
+        raise CLIError(f"Invalid domain: {value!r}")
+    for label in labels:
+        if not DOMAIN_LABEL_RE.match(label):
+            raise CLIError(f"Invalid domain: {value!r}")
+        if label.startswith("-") or label.endswith("-"):
+            raise CLIError(f"Invalid domain: {value!r}")
     return value
 
 

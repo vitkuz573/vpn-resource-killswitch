@@ -26,10 +26,6 @@ WATCH_SERVICE_NAME = "vpn-resource-killswitch-watch.service"
 WATCH_SERVICE_PATH = Path("/etc/systemd/system") / WATCH_SERVICE_NAME
 
 DEFAULT_PROFILE_NAME = "default"
-# Country-level Google embargo baseline from Google Ads help center (2026-04):
-# Cuba, Iran, North Korea. Region-only restrictions (Crimea, DNR, LNR) are handled by region,
-# and cannot be reliably detected from country_code-only geolocation APIs.
-GOOGLE_OFAC_COUNTRY_CODES = ("CU", "IR", "KP")
 
 GEO_LOOKUP_URL = "https://ipwho.is/"
 

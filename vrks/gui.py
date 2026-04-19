@@ -108,6 +108,7 @@ PAGE_HTML = """<!doctype html>
         <button onclick="runApply()">Apply Rules</button>
         <button class="alt" onclick="runProbe()">Probe</button>
         <button onclick="bootstrapPreset()">Bootstrap Preset</button>
+        <button class="alt" onclick="runSync()">Sync Full</button>
       </div>
       <div id="probe" style="margin-top:8px;"></div>
       <label style="margin-top:10px; display:block;">Preset Name</label>
@@ -115,9 +116,38 @@ PAGE_HTML = """<!doctype html>
       <label style="margin-top:10px; display:block;">Access Check Resource</label>
       <input id="checkResource" placeholder="resource name">
       <div class="row">
+        <label><input id="checkAllDomains" type="checkbox"> all domains</label>
         <button class="alt" onclick="runAccessCheck()">Access Check</button>
       </div>
       <div id="accessResult" style="margin-top:8px;"></div>
+      <label style="margin-top:10px; display:block;">Discover Resource</label>
+      <input id="discoverResource" placeholder="resource name">
+      <div class="row">
+        <input id="discoverDepth" type="number" min="0" max="5" value="2" style="width:90px;">
+        <label><input id="discoverExternal" type="checkbox"> include external</label>
+      </div>
+      <div class="row">
+        <button class="alt" onclick="runDiscover()">Discover Domains</button>
+        <button onclick="runAutofill()">Autofill Domains</button>
+      </div>
+      <div id="discoverResult" style="margin-top:8px;"></div>
+      <label style="margin-top:12px; display:block;">Runtime Capture Command</label>
+      <input id="runtimeCmd" placeholder="/tmp/antigravity_ide/Antigravity/antigravity">
+      <label style="margin-top:10px; display:block;">Run Command As User (optional)</label>
+      <input id="runtimeUser" placeholder="vitaly">
+      <div class="row">
+        <input id="runtimeDuration" type="number" min="5" max="1800" value="60" style="width:90px;">
+        <input id="runtimeStartupDelay" type="number" min="0" max="300" step="0.5" value="2" style="width:110px;">
+      </div>
+      <label style="margin-top:10px; display:block;">Runtime Include Regex (comma-separated)</label>
+      <input id="runtimeInclude" placeholder="antigravity|googleapis|google\\.com|gvt1|run\\.app">
+      <label style="margin-top:10px; display:block;">Runtime Exclude Regex (comma-separated)</label>
+      <input id="runtimeExclude" placeholder="microsoft\\.com|cloudapp\\.azure\\.com|localhost|127\\.0\\.0\\.1">
+      <div class="row">
+        <button class="alt" onclick="runRuntimeDiscover()">Runtime Discover</button>
+        <button onclick="runRuntimeAutofill()">Runtime Autofill</button>
+      </div>
+      <div id="runtimeResult" style="margin-top:8px;"></div>
     </section>
 
     <section class="card">
@@ -263,15 +293,166 @@ PAGE_HTML = """<!doctype html>
         }
         const payload = {
           resource_name: resourceName,
-          timeout: 8
+          timeout: 8,
+          all_domains: document.getElementById('checkAllDomains').checked
         };
         const out = await api('/api/access-check', {method: 'POST', body: JSON.stringify(payload)});
         const ok = out.access_ok ? '<span class="ok">PASS</span>' : '<span class="err">FAIL</span>';
-        document.getElementById('accessResult').innerHTML =
-          'Access: ' + ok
-          + ' (mode=' + out.expected_mode
-          + ', vpn=' + out.vpn_reachable
-          + ', non-vpn-block=' + out.non_vpn_blocked + ')';
+        if (out.all_domains) {
+          document.getElementById('accessResult').innerHTML =
+            'Access: ' + ok
+            + ' (all domains, checked=' + out.domains_checked
+            + ', failed=' + out.failed_domains.length + ')';
+        } else {
+          document.getElementById('accessResult').innerHTML =
+            'Access: ' + ok
+            + ' (mode=' + out.expected_mode
+            + ', vpn=' + out.vpn_reachable
+            + ', non-vpn-block=' + out.non_vpn_blocked + ')';
+        }
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runSync() {
+      try {
+        const resourceName = document.getElementById('checkResource').value.trim();
+        const payload = {
+          resources: resourceName ? [resourceName] : null,
+          max_depth: parseInt(document.getElementById('discoverDepth').value || '2', 10),
+          include_external: document.getElementById('discoverExternal').checked,
+          dns_check: true,
+          run_apply: true,
+          verify_timeout: 8,
+          check_access: true,
+          access_timeout: 8,
+          access_all_domains: document.getElementById('checkAllDomains').checked
+        };
+        const out = await api('/api/sync', {method: 'POST', body: JSON.stringify(payload)});
+        const ok = out.passed ? '<span class="ok">PASS</span>' : '<span class="err">FAIL</span>';
+        document.getElementById('probe').innerHTML =
+          'Sync: ' + ok
+          + ' (changed_resources=' + out.changed_resources
+          + ', added_domains=' + out.added_domains_total + ')';
+        await refresh();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runDiscover() {
+      try {
+        const resourceName = document.getElementById('discoverResource').value.trim()
+          || document.getElementById('checkResource').value.trim();
+        if (!resourceName) {
+          alert('Discover resource name is required');
+          return;
+        }
+        const payload = {
+          resource_name: resourceName,
+          max_depth: parseInt(document.getElementById('discoverDepth').value || '2', 10),
+          include_external: document.getElementById('discoverExternal').checked,
+          dns_check: true
+        };
+        const out = await api('/api/discover', {method: 'POST', body: JSON.stringify(payload)});
+        document.getElementById('discoverResult').innerHTML =
+          'Discovered ' + out.domains.length + ' domains, new=' + out.new_domains.length
+          + ', unresolved=' + out.unresolved_domains.length;
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runAutofill() {
+      try {
+        const resourceName = document.getElementById('discoverResource').value.trim()
+          || document.getElementById('checkResource').value.trim();
+        if (!resourceName) {
+          alert('Autofill resource name is required');
+          return;
+        }
+        const payload = {
+          resource_name: resourceName,
+          max_depth: parseInt(document.getElementById('discoverDepth').value || '2', 10),
+          include_external: document.getElementById('discoverExternal').checked,
+          dns_check: true,
+          run_apply: true
+        };
+        const out = await api('/api/resource/autofill', {method: 'POST', body: JSON.stringify(payload)});
+        document.getElementById('discoverResult').innerHTML =
+          'Autofill: changed=' + out.changed + ', added=' + out.new_domains.length + ', total=' + out.domains_total;
+        await refresh();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function parseCsv(value) {
+      return value
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean);
+    }
+
+    async function runRuntimeDiscover() {
+      try {
+        const runtimeCmd = document.getElementById('runtimeCmd').value.trim();
+        if (!runtimeCmd) {
+          alert('Runtime command is required');
+          return;
+        }
+        const payload = {
+          command: runtimeCmd,
+          command_user: document.getElementById('runtimeUser').value.trim() || null,
+          duration: parseInt(document.getElementById('runtimeDuration').value || '60', 10),
+          startup_delay: parseFloat(document.getElementById('runtimeStartupDelay').value || '2'),
+          capture_interface: 'any',
+          include_patterns: parseCsv(document.getElementById('runtimeInclude').value),
+          exclude_patterns: parseCsv(document.getElementById('runtimeExclude').value)
+        };
+        const out = await api('/api/runtime/discover', {method: 'POST', body: JSON.stringify(payload)});
+        document.getElementById('runtimeResult').innerHTML =
+          'Runtime discover: domains=' + out.domains_count
+          + ', capture_lines=' + out.capture_lines
+          + ', timed_out=' + out.command_timed_out;
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function runRuntimeAutofill() {
+      try {
+        const runtimeCmd = document.getElementById('runtimeCmd').value.trim();
+        if (!runtimeCmd) {
+          alert('Runtime command is required');
+          return;
+        }
+        const resourceName = document.getElementById('discoverResource').value.trim()
+          || document.getElementById('checkResource').value.trim();
+        if (!resourceName) {
+          alert('Resource name is required for runtime autofill');
+          return;
+        }
+        const payload = {
+          command: runtimeCmd,
+          command_user: document.getElementById('runtimeUser').value.trim() || null,
+          duration: parseInt(document.getElementById('runtimeDuration').value || '60', 10),
+          startup_delay: parseFloat(document.getElementById('runtimeStartupDelay').value || '2'),
+          capture_interface: 'any',
+          include_patterns: parseCsv(document.getElementById('runtimeInclude').value),
+          exclude_patterns: parseCsv(document.getElementById('runtimeExclude').value),
+          run_apply: true
+        };
+        const out = await api('/api/resource/runtime-autofill', {
+          method: 'POST',
+          body: JSON.stringify(Object.assign({resource_name: resourceName}, payload))
+        });
+        document.getElementById('runtimeResult').innerHTML =
+          'Runtime autofill: changed=' + out.changed
+          + ', added=' + out.new_domains.length
+          + ', total=' + out.domains_total;
+        await refresh();
       } catch (e) {
         alert(e.message);
       }
@@ -422,6 +603,7 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         resource_name=str(data.get("resource_name") or ""),
                         domain=data.get("domain"),
                         timeout=int(data.get("timeout") or 8),
+                        all_domains=bool(data.get("all_domains", False)),
                     )
                     _json_response(self, report)
                     return
@@ -432,6 +614,79 @@ def launch_gui(service: KillSwitchService, host: str, port: int) -> None:
                         vpn_interface=data.get("vpn_interface"),
                         install_bin=bool(data.get("install_bin", False)),
                         timeout=int(data.get("timeout") or 8),
+                        autodiscover=bool(data.get("autodiscover", True)),
+                        discovery_depth=int(data.get("discovery_depth") or 2),
+                        include_external=bool(data.get("include_external", False)),
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/discover":
+                    if not data.get("resource_name"):
+                        raise CLIError("resource_name is required.")
+                    report = service.discover_resource_domains(
+                        resource_name=str(data["resource_name"]),
+                        max_depth=int(data.get("max_depth") or 2),
+                        include_external=bool(data.get("include_external", False)),
+                        dns_check=bool(data.get("dns_check", True)),
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/resource/autofill":
+                    if not data.get("resource_name"):
+                        raise CLIError("resource_name is required.")
+                    report = service.autofill_resource_domains(
+                        resource_name=str(data["resource_name"]),
+                        max_depth=int(data.get("max_depth") or 2),
+                        include_external=bool(data.get("include_external", False)),
+                        dns_check=bool(data.get("dns_check", True)),
+                        run_apply=bool(data.get("run_apply", True)),
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/sync":
+                    report = service.sync(
+                        resources=[str(x) for x in (data.get("resources") or [])] or None,
+                        max_depth=int(data.get("max_depth") or 2),
+                        include_external=bool(data.get("include_external", False)),
+                        dns_check=bool(data.get("dns_check", True)),
+                        run_apply=bool(data.get("run_apply", True)),
+                        verify_timeout=int(data.get("verify_timeout") or 8),
+                        check_access=bool(data.get("check_access", True)),
+                        access_timeout=int(data.get("access_timeout") or 8),
+                        access_all_domains=bool(data.get("access_all_domains", False)),
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/runtime/discover":
+                    report = service.runtime_discover(
+                        command=str(data.get("command") or ""),
+                        command_user=(str(data.get("command_user") or "").strip() or None),
+                        duration=int(data.get("duration") or 60),
+                        startup_delay=float(data.get("startup_delay") or 2.0),
+                        capture_interface=str(data.get("capture_interface") or "any"),
+                        include_patterns=[str(x) for x in (data.get("include_patterns") or [])],
+                        exclude_patterns=[str(x) for x in (data.get("exclude_patterns") or [])],
+                    )
+                    _json_response(self, report)
+                    return
+
+                if path == "/api/resource/runtime-autofill":
+                    if not data.get("resource_name"):
+                        raise CLIError("resource_name is required.")
+                    report = service.runtime_autofill_resource(
+                        resource_name=str(data["resource_name"]),
+                        command=str(data.get("command") or ""),
+                        command_user=(str(data.get("command_user") or "").strip() or None),
+                        duration=int(data.get("duration") or 60),
+                        startup_delay=float(data.get("startup_delay") or 2.0),
+                        capture_interface=str(data.get("capture_interface") or "any"),
+                        include_patterns=[str(x) for x in (data.get("include_patterns") or [])],
+                        exclude_patterns=[str(x) for x in (data.get("exclude_patterns") or [])],
+                        run_apply=bool(data.get("run_apply", True)),
                     )
                     _json_response(self, report)
                     return

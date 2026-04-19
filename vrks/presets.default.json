@@ -3,12 +3,21 @@
   "presets": [
     {
       "name": "antigravity",
-      "description": "Google Anti-Gravity profile with recommended anti-ban policy.",
+      "description": "Google Antigravity IDE profile (runtime-verified endpoints + anti-ban policy).",
       "domains": [
-        "elgoog.im",
-        "www.elgoog.im",
-        "mrdoob.com",
-        "www.mrdoob.com"
+        "accounts.google.com",
+        "antigravity-auto-updater-974169037036.us-central1.run.app",
+        "antigravity-unleash.goog",
+        "antigravity.google",
+        "cloudcode-pa.googleapis.com",
+        "docs.googleapis.com",
+        "edgedl.me.gvt1.com",
+        "oauth2.googleapis.com",
+        "one.google.com",
+        "optimizationguide-pa.googleapis.com",
+        "play.googleapis.com",
+        "www.antigravity.google",
+        "www.googleapis.com"
       ],
       "policy": {
         "allowed_countries": [],

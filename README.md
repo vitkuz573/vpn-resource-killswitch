@@ -23,6 +23,7 @@ Core logic is generic; service-specific behavior comes from external presets.
 - `vrks/gui.py`: local web dashboard.
 - `vrks/service.py`: orchestration layer (setup/apply/probe/resource management).
 - `vrks/network.py`: interface detection, DNS resolve, egress country/server lookup, probe.
+- `vrks/discovery.py`: domain crawler/extractor for automatic coverage expansion.
 - `vrks/firewall.py`: nftables rule generation and apply.
 - `vrks/storage.py`: config/state persistence.
 - `vrks/runtime.py`: runtime install (`/usr/local/bin/vrks`) + systemd timer/watch/dispatcher integration.
@@ -32,7 +33,8 @@ Core logic is generic; service-specific behavior comes from external presets.
 ```bash
 cd /home/vitaly/projects/vpn-resource-killswitch
 sudo python3 vrks.py bootstrap --preset antigravity --vpn-interface amn0
-sudo python3 vrks.py access-check --resource antigravity
+sudo python3 vrks.py sync --resource antigravity --access-all-domains
+sudo python3 vrks.py access-check --resource antigravity --all-domains
 sudo python3 vrks.py verify
 ```
 
@@ -99,12 +101,62 @@ Optional override catalog:
 
 User presets override built-ins by preset name.
 
+## Autodiscovery / Self-Heal
+
+Find hidden/secondary domains by crawling resource pages:
+
+```bash
+sudo python3 vrks.py discover --resource antigravity --depth 2 --json
+```
+
+Auto-merge missing domains for one resource:
+
+```bash
+sudo python3 vrks.py resource-autofill --resource antigravity --depth 2
+```
+
+Full self-heal cycle for one/all resources:
+
+```bash
+# all enabled resources
+sudo python3 vrks.py sync
+
+# one resource + strict access probe across all its domains
+sudo python3 vrks.py sync --resource antigravity --access-all-domains
+```
+
+## Runtime Discovery (IDE/App Traffic)
+
+Capture real network hosts (DNS + TLS SNI + HTTP Host) while any app runs:
+
+```bash
+sudo python3 vrks.py runtime-discover \
+  --cmd "/tmp/antigravity_ide/Antigravity/antigravity" \
+  --run-as-user "$SUDO_USER" \
+  --duration 60 \
+  --include "antigravity|googleapis|google\\.com|gvt1|run\\.app" \
+  --exclude "microsoft\\.com|cloudapp\\.azure\\.com|localhost|127\\.0\\.0\\.1"
+```
+
+Auto-merge runtime-discovered domains into resource profile:
+
+```bash
+sudo python3 vrks.py resource-runtime-autofill \
+  --resource antigravity \
+  --cmd "/tmp/antigravity_ide/Antigravity/antigravity" \
+  --run-as-user "$SUDO_USER" \
+  --duration 60 \
+  --include "antigravity|googleapis|google\\.com|gvt1|run\\.app" \
+  --exclude "microsoft\\.com|cloudapp\\.azure\\.com|localhost|127\\.0\\.0\\.1"
+```
+
 ## Access Check
 
 Simple yes/no access verdict for a resource:
 
 ```bash
 sudo python3 vrks.py access-check --resource antigravity
+sudo python3 vrks.py access-check --resource antigravity --all-domains
 ```
 
 Result is PASS only when effective mode behavior is correct:
@@ -128,6 +180,11 @@ Main endpoints:
 - `POST /v1/bootstrap`
 - `GET /v1/presets`
 - `POST /v1/presets/{name}/apply`
+- `POST /v1/discover`
+- `POST /v1/resources/{name}/autofill`
+- `POST /v1/runtime/discover`
+- `POST /v1/resources/{name}/runtime-autofill`
+- `POST /v1/sync`
 - `GET /v1/resources`
 - `POST /v1/resources`
 - `DELETE /v1/resources/{name}`
@@ -153,7 +210,13 @@ Stored at `/etc/vpn-resource-killswitch/config.json`:
   "resources": [
     {
       "name": "antigravity",
-      "domains": ["mrdoob.com", "elgoog.im"],
+      "domains": [
+        "antigravity.google",
+        "antigravity-unleash.goog",
+        "cloudcode-pa.googleapis.com",
+        "edgedl.me.gvt1.com",
+        "play.googleapis.com"
+      ],
       "policy": {
         "required_country": null,
         "required_server": null,
@@ -182,8 +245,14 @@ Example strict antigravity policy without hardcoded defaults:
 ```bash
 sudo python3 vrks.py resource-add \
   --name antigravity \
-  --domain elgoog.im \
-  --domain mrdoob.com \
+  --domain antigravity.google \
+  --domain antigravity-unleash.goog \
+  --domain antigravity-auto-updater-974169037036.us-central1.run.app \
+  --domain cloudcode-pa.googleapis.com \
+  --domain edgedl.me.gvt1.com \
+  --domain play.googleapis.com \
+  --domain accounts.google.com \
+  --domain oauth2.googleapis.com \
   --block-country RU \
   --block-country CU \
   --block-country IR \

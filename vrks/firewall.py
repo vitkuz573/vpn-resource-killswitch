@@ -65,9 +65,10 @@ def apply_nft(
     hard_block_v4: set[str],
     hard_block_v6: set[str],
 ) -> None:
+    script = ""
     if nft_table_exists():
-        run(["nft", "delete", "table", "inet", NFT_TABLE], check=True)
-    script = build_nft_rules(
+        script += f"delete table inet {NFT_TABLE}\n"
+    script += build_nft_rules(
         vpn_interface=vpn_interface,
         vpn_only_v4=vpn_only_v4,
         vpn_only_v6=vpn_only_v6,

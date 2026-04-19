@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import shutil
 import time
 import sys
@@ -20,6 +21,7 @@ from .constants import (
     WATCH_SERVICE_NAME,
     WATCH_SERVICE_PATH,
 )
+from .discovery import discover_domains
 from .errors import CLIError
 from .firewall import apply_nft, delete_nft_table, nft_table_exists
 from .models import AppConfig, ResourcePolicy, ResourceProfile, VpnContext
@@ -47,6 +49,7 @@ from .runtime import (
     write_systemd_units,
 )
 from .system import ensure_root, run
+from .traffic import discover_runtime_domains, parse_command
 
 
 def _sorted_ips(values: set[str]) -> list[str]:
@@ -150,6 +153,16 @@ class KillSwitchService:
     def __init__(self, project_root: Path | None = None) -> None:
         self.project_root = project_root or Path(__file__).resolve().parents[1]
 
+    def _install_runtime_and_hooks(self, *, install_bin: bool) -> str:
+        if install_bin:
+            exec_path = str(install_runtime_tree(self.project_root))
+        else:
+            exec_path = f"{sys.executable} {(self.project_root / 'vrks.py').resolve()}"
+        write_systemd_units(exec_path)
+        install_nm_dispatcher_hook()
+        enable_timer()
+        return exec_path
+
     def setup(
         self,
         *,
@@ -189,14 +202,7 @@ class KillSwitchService:
         config = AppConfig(version=CONFIG_VERSION, vpn_interface=vpn_if, resources=[initial])
         storage.save_config(config)
 
-        if install_bin:
-            exec_path = str(install_runtime_tree(self.project_root))
-        else:
-            exec_path = f"{sys.executable} {(self.project_root / 'vrks.py').resolve()}"
-
-        write_systemd_units(exec_path)
-        install_nm_dispatcher_hook()
-        enable_timer()
+        self._install_runtime_and_hooks(install_bin=install_bin)
 
         report = self.apply(config=config)
         return {"config": config, "report": report}
@@ -208,10 +214,14 @@ class KillSwitchService:
         vpn_interface: str | None,
         install_bin: bool,
         timeout: int,
+        autodiscover: bool,
+        discovery_depth: int,
+        include_external: bool,
     ) -> dict[str, Any]:
         ensure_root()
         preset = get_preset(preset_name)
         configured = False
+        runtime_installed = False
         try:
             storage.load_config()
             configured = True
@@ -230,10 +240,40 @@ class KillSwitchService:
                 blocked_context_keywords=preset.policy.get("blocked_context_keywords"),
                 install_bin=install_bin,
             )
+            runtime_installed = True
         else:
-            self.apply_preset(name=preset_name, replace=True, run_apply=True)
+            config = storage.load_config()
+            try:
+                existing = _resource_by_name(config, preset.name)
+                merged_domains = normalize_domains(existing.domains + preset.domains)
+            except CLIError:
+                merged_domains = normalize_domains(preset.domains)
+            self.add_resource(
+                name=preset.name,
+                domains=merged_domains,
+                required_country=preset.policy.get("required_country"),
+                required_server=preset.policy.get("required_server"),
+                allowed_countries=preset.policy.get("allowed_countries"),
+                blocked_countries=preset.policy.get("blocked_countries"),
+                blocked_context_keywords=preset.policy.get("blocked_context_keywords"),
+                replace=True,
+            )
+            self.apply()
+
+        if not runtime_installed:
+            self._install_runtime_and_hooks(install_bin=install_bin)
+
+        sync_report = None
+        if autodiscover:
+            sync_report = self.autofill_resource_domains(
+                resource_name=preset.name,
+                max_depth=discovery_depth,
+                include_external=include_external,
+                dns_check=True,
+                run_apply=True,
+            )
         verify = self.verify(resources=[preset_name], timeout=timeout)
-        return {"preset": preset_name, "verify": verify}
+        return {"preset": preset_name, "sync_report": sync_report, "verify": verify}
 
     def list_presets(self) -> list[dict[str, Any]]:
         result = []
@@ -271,6 +311,305 @@ class KillSwitchService:
             },
             "applied": run_apply,
             "apply_report": apply_report,
+        }
+
+    def discover_resource_domains(
+        self,
+        *,
+        resource_name: str,
+        max_depth: int,
+        include_external: bool,
+        dns_check: bool,
+    ) -> dict[str, Any]:
+        config = storage.load_config()
+        resource = _resource_by_name(config, resource_name)
+        report = discover_domains(
+            seed_domains=resource.domains,
+            max_depth=max_depth,
+            include_external=include_external,
+            dns_check=dns_check,
+        )
+        current = normalize_domains(resource.domains)
+        discovered = normalize_domains(report.domains) if report.domains else []
+        new_domains = sorted(set(discovered) - set(current))
+        return {
+            "resource": normalize_resource_name(resource.name),
+            "seed_domains": report.seeds,
+            "domains": discovered,
+            "new_domains": new_domains,
+            "external_domains_seen": report.external_domains,
+            "unresolved_domains": report.unresolved_domains,
+            "crawled_urls": report.crawled_urls,
+            "failures": report.failures,
+        }
+
+    def discover_preset_domains(
+        self,
+        *,
+        preset_name: str,
+        max_depth: int,
+        include_external: bool,
+        dns_check: bool,
+    ) -> dict[str, Any]:
+        preset = get_preset(preset_name)
+        report = discover_domains(
+            seed_domains=preset.domains,
+            max_depth=max_depth,
+            include_external=include_external,
+            dns_check=dns_check,
+        )
+        current = normalize_domains(preset.domains)
+        discovered = normalize_domains(report.domains) if report.domains else []
+        new_domains = sorted(set(discovered) - set(current))
+        return {
+            "preset": preset.name,
+            "seed_domains": report.seeds,
+            "domains": discovered,
+            "new_domains": new_domains,
+            "external_domains_seen": report.external_domains,
+            "unresolved_domains": report.unresolved_domains,
+            "crawled_urls": report.crawled_urls,
+            "failures": report.failures,
+        }
+
+    def runtime_discover(
+        self,
+        *,
+        command: str,
+        command_user: str | None,
+        duration: int,
+        startup_delay: float,
+        capture_interface: str,
+        include_patterns: list[str] | None,
+        exclude_patterns: list[str] | None,
+    ) -> dict[str, Any]:
+        parsed_command = parse_command(command)
+        run_user = (command_user or "").strip() or None
+        if run_user is None and os.geteuid() == 0:
+            run_user = (os.environ.get("SUDO_USER") or "").strip() or None
+        if run_user is not None:
+            parsed_command = ["sudo", "-u", run_user, "--"] + parsed_command
+        report = discover_runtime_domains(
+            command=parsed_command,
+            duration=duration,
+            startup_delay=startup_delay,
+            capture_interface=capture_interface,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns,
+        )
+        return {
+            "command": report.command,
+            "command_user": run_user,
+            "capture_interface": report.capture_interface,
+            "duration": report.duration,
+            "startup_delay": report.startup_delay,
+            "capture_lines": report.capture_lines,
+            "domains": report.domains,
+            "domains_count": len(report.domains),
+            "excluded_domains": report.excluded_domains,
+            "invalid_values": report.invalid_values,
+            "command_returncode": report.command_returncode,
+            "command_timed_out": report.command_timed_out,
+            "tshark_stderr_tail": report.tshark_stderr_tail,
+        }
+
+    def runtime_autofill_resource(
+        self,
+        *,
+        resource_name: str,
+        command: str,
+        command_user: str | None,
+        duration: int,
+        startup_delay: float,
+        capture_interface: str,
+        include_patterns: list[str] | None,
+        exclude_patterns: list[str] | None,
+        run_apply: bool,
+    ) -> dict[str, Any]:
+        ensure_root()
+        config = storage.load_config()
+        resource = _resource_by_name(config, resource_name)
+        discovery = self.runtime_discover(
+            command=command,
+            command_user=command_user,
+            duration=duration,
+            startup_delay=startup_delay,
+            capture_interface=capture_interface,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns,
+        )
+        merged_domains = normalize_domains(resource.domains + discovery["domains"])
+        before_domains = normalize_domains(resource.domains)
+        changed = before_domains != merged_domains
+        if changed:
+            self.add_resource(
+                name=resource.name,
+                domains=merged_domains,
+                required_country=resource.policy.required_country,
+                required_server=resource.policy.required_server,
+                allowed_countries=resource.policy.allowed_countries,
+                blocked_countries=resource.policy.blocked_countries,
+                blocked_context_keywords=resource.policy.blocked_context_keywords,
+                replace=True,
+            )
+        apply_report = self.apply() if (run_apply and changed) else None
+        return {
+            "resource": normalize_resource_name(resource.name),
+            "changed": changed,
+            "domains_total": len(merged_domains),
+            "new_domains": sorted(set(merged_domains) - set(before_domains)),
+            "runtime_discovery": discovery,
+            "applied": bool(apply_report is not None),
+            "apply_report": apply_report,
+        }
+
+    def autofill_resource_domains(
+        self,
+        *,
+        resource_name: str,
+        max_depth: int,
+        include_external: bool,
+        dns_check: bool,
+        run_apply: bool,
+    ) -> dict[str, Any]:
+        ensure_root()
+        config = storage.load_config()
+        resource = _resource_by_name(config, resource_name)
+        discovery = self.discover_resource_domains(
+            resource_name=resource_name,
+            max_depth=max_depth,
+            include_external=include_external,
+            dns_check=dns_check,
+        )
+
+        merged_domains = normalize_domains(resource.domains + discovery["domains"])
+        changed = normalize_domains(resource.domains) != merged_domains
+        if changed:
+            self.add_resource(
+                name=resource.name,
+                domains=merged_domains,
+                required_country=resource.policy.required_country,
+                required_server=resource.policy.required_server,
+                allowed_countries=resource.policy.allowed_countries,
+                blocked_countries=resource.policy.blocked_countries,
+                blocked_context_keywords=resource.policy.blocked_context_keywords,
+                replace=True,
+            )
+        apply_report = self.apply() if (run_apply and changed) else None
+        return {
+            "resource": normalize_resource_name(resource.name),
+            "changed": changed,
+            "domains_total": len(merged_domains),
+            "new_domains": sorted(set(merged_domains) - set(normalize_domains(resource.domains))),
+            "discovery": discovery,
+            "applied": bool(apply_report is not None),
+            "apply_report": apply_report,
+        }
+
+    def sync(
+        self,
+        *,
+        resources: list[str] | None,
+        max_depth: int,
+        include_external: bool,
+        dns_check: bool,
+        run_apply: bool,
+        verify_timeout: int,
+        check_access: bool,
+        access_timeout: int,
+        access_all_domains: bool,
+    ) -> dict[str, Any]:
+        ensure_root()
+        config = storage.load_config()
+        wanted = {normalize_resource_name(item) for item in (resources or [])}
+
+        targets: list[str] = []
+        for resource in config.resources:
+            name = normalize_resource_name(resource.name)
+            if wanted and name not in wanted:
+                continue
+            if not resource.enabled:
+                continue
+            targets.append(name)
+
+        if wanted and not targets:
+            raise CLIError("No requested resources found in config.")
+        if not targets:
+            raise CLIError("No enabled resources to sync.")
+
+        resource_reports: list[dict[str, Any]] = []
+        changed_any = False
+        changed_count = 0
+        added_domains_total = 0
+
+        for name in targets:
+            current = storage.load_config()
+            resource = _resource_by_name(current, name)
+            before_domains = normalize_domains(resource.domains)
+            discovery = self.discover_resource_domains(
+                resource_name=name,
+                max_depth=max_depth,
+                include_external=include_external,
+                dns_check=dns_check,
+            )
+            merged_domains = normalize_domains(before_domains + discovery["domains"])
+            new_domains = sorted(set(merged_domains) - set(before_domains))
+            changed = bool(new_domains)
+            if changed:
+                changed_any = True
+                changed_count += 1
+                added_domains_total += len(new_domains)
+                self.add_resource(
+                    name=resource.name,
+                    domains=merged_domains,
+                    required_country=resource.policy.required_country,
+                    required_server=resource.policy.required_server,
+                    allowed_countries=resource.policy.allowed_countries,
+                    blocked_countries=resource.policy.blocked_countries,
+                    blocked_context_keywords=resource.policy.blocked_context_keywords,
+                    replace=True,
+                )
+            resource_reports.append(
+                {
+                    "resource": name,
+                    "changed": changed,
+                    "domains_total": len(merged_domains),
+                    "new_domains": new_domains,
+                    "discovery": discovery,
+                }
+            )
+
+        apply_report = self.apply() if (run_apply and changed_any) else None
+        verify_report = self.verify(resources=targets, timeout=verify_timeout)
+
+        access_reports: list[dict[str, Any]] = []
+        access_passed = True
+        if check_access:
+            for name in targets:
+                report = self.access_check(
+                    resource_name=name,
+                    domain=None,
+                    timeout=access_timeout,
+                    all_domains=access_all_domains,
+                )
+                access_reports.append(report)
+            access_passed = all(bool(item["access_ok"]) for item in access_reports)
+
+        overall_passed = bool(verify_report["passed"]) and access_passed
+        return {
+            "resources": targets,
+            "changed": changed_any,
+            "changed_resources": changed_count,
+            "added_domains_total": added_domains_total,
+            "resource_reports": resource_reports,
+            "applied": bool(apply_report is not None),
+            "apply_report": apply_report,
+            "verify": verify_report,
+            "access_checked": check_access,
+            "access_all_domains": access_all_domains if check_access else False,
+            "access_ok": access_passed if check_access else None,
+            "access_reports": access_reports,
+            "passed": overall_passed,
         }
 
     def apply(self, config: AppConfig | None = None) -> dict[str, Any]:
@@ -544,7 +883,46 @@ class KillSwitchService:
         resource_name: str,
         domain: str | None,
         timeout: int,
+        all_domains: bool = False,
     ) -> dict[str, Any]:
+        if all_domains:
+            config = storage.load_config()
+            resource = _resource_by_name(config, resource_name)
+            checks: list[dict[str, Any]] = []
+            for current_domain in normalize_domains(resource.domains):
+                probe = self.probe(
+                    resource_name=resource_name,
+                    domain=current_domain,
+                    non_vpn_interface=None,
+                    timeout=timeout,
+                )
+                expected_mode = probe["expected_mode"]
+                vpn_reachable = bool(probe["vpn_result"]["reachable"])
+                non_vpn_blocked = bool(probe["non_vpn_result"]["blocked"])
+                if expected_mode == "hard_block":
+                    access_ok = (not vpn_reachable) and non_vpn_blocked
+                else:
+                    access_ok = vpn_reachable and non_vpn_blocked
+                checks.append(
+                    {
+                        "domain": probe["url"],
+                        "expected_mode": expected_mode,
+                        "vpn_reachable": vpn_reachable,
+                        "non_vpn_blocked": non_vpn_blocked,
+                        "access_ok": access_ok,
+                        "probe": probe,
+                    }
+                )
+            failed = [item["domain"] for item in checks if not item["access_ok"]]
+            return {
+                "resource": normalize_resource_name(resource.name),
+                "all_domains": True,
+                "domains_checked": len(checks),
+                "failed_domains": failed,
+                "access_ok": len(failed) == 0,
+                "checks": checks,
+            }
+
         probe = self.probe(
             resource_name=resource_name,
             domain=domain,
@@ -565,6 +943,7 @@ class KillSwitchService:
             "vpn_reachable": vpn_reachable,
             "non_vpn_blocked": non_vpn_blocked,
             "access_ok": access_ok,
+            "all_domains": False,
             "probe": probe,
         }
 
@@ -625,7 +1004,7 @@ class KillSwitchService:
             "probes": probes,
         }
 
-    def watch(self, *, debounce_seconds: float = 1.0) -> int:
+    def watch(self, *, debounce_seconds: float = 0.2) -> int:
         ensure_root()
         last_apply_at = 0.0
 

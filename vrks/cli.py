@@ -89,7 +89,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not install /usr/local/bin/vrks runtime on first setup.",
     )
     bootstrap_p.add_argument("--timeout", type=int, default=8, help="Verify probe timeout in seconds.")
+    bootstrap_p.add_argument(
+        "--no-autodiscover",
+        dest="autodiscover",
+        action="store_false",
+        help="Skip domain autodiscovery during bootstrap.",
+    )
+    bootstrap_p.add_argument("--discovery-depth", type=int, default=2, help="Autodiscovery crawl depth.")
+    bootstrap_p.add_argument(
+        "--include-external",
+        action="store_true",
+        help="Include external domains discovered during bootstrap crawl.",
+    )
     bootstrap_p.set_defaults(install_bin=True)
+    bootstrap_p.set_defaults(autodiscover=True)
 
     apply_p = sub.add_parser("apply", help="Refresh nftables rules from current config.")
 
@@ -110,6 +123,151 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preset_apply_p.set_defaults(run_apply=True)
 
+    discover_p = sub.add_parser("discover", help="Discover domains by crawling resource or preset.")
+    discover_target = discover_p.add_mutually_exclusive_group(required=True)
+    discover_target.add_argument("--resource", help="Resource name to crawl from config domains.")
+    discover_target.add_argument("--preset", help="Preset name to crawl from preset domains.")
+    discover_p.add_argument("--depth", type=int, default=2, help="Crawl depth.")
+    discover_p.add_argument("--include-external", action="store_true", help="Include external domains.")
+    discover_p.add_argument("--no-dns-check", dest="dns_check", action="store_false", help="Skip DNS filter.")
+    discover_p.add_argument("--json", action="store_true", help="Output JSON.")
+    discover_p.set_defaults(dns_check=True)
+
+    autofill_p = sub.add_parser(
+        "resource-autofill",
+        help="Discover and auto-merge missing domains into resource, then optionally apply.",
+    )
+    autofill_p.add_argument("--resource", required=True, help="Resource name.")
+    autofill_p.add_argument("--depth", type=int, default=2, help="Crawl depth.")
+    autofill_p.add_argument("--include-external", action="store_true", help="Include external domains.")
+    autofill_p.add_argument("--no-dns-check", dest="dns_check", action="store_false", help="Skip DNS filter.")
+    autofill_p.add_argument("--no-apply", dest="run_apply", action="store_false", help="Do not apply rules.")
+    autofill_p.add_argument("--json", action="store_true", help="Output JSON.")
+    autofill_p.set_defaults(dns_check=True, run_apply=True)
+
+    sync_p = sub.add_parser(
+        "sync",
+        help="Autodiscover missing domains for resources, apply rules, verify and access-check.",
+    )
+    sync_p.add_argument(
+        "--resource",
+        action="append",
+        help="Sync only selected resource(s), repeat option. Default: all enabled resources.",
+    )
+    sync_p.add_argument("--depth", type=int, default=2, help="Crawl depth.")
+    sync_p.add_argument("--include-external", action="store_true", help="Include external domains.")
+    sync_p.add_argument("--no-dns-check", dest="dns_check", action="store_false", help="Skip DNS filter.")
+    sync_p.add_argument("--no-apply", dest="run_apply", action="store_false", help="Skip apply step.")
+    sync_p.add_argument(
+        "--skip-access-check",
+        dest="check_access",
+        action="store_false",
+        help="Skip access-check phase.",
+    )
+    sync_p.add_argument(
+        "--access-all-domains",
+        action="store_true",
+        help="During access-check, probe every configured domain of each resource.",
+    )
+    sync_p.add_argument(
+        "--verify-timeout",
+        type=int,
+        default=8,
+        help="Probe timeout for verify phase (seconds).",
+    )
+    sync_p.add_argument(
+        "--access-timeout",
+        type=int,
+        default=8,
+        help="Probe timeout for access-check phase (seconds).",
+    )
+    sync_p.add_argument("--json", action="store_true", help="Output JSON.")
+    sync_p.set_defaults(dns_check=True, run_apply=True, check_access=True)
+
+    runtime_discover_p = sub.add_parser(
+        "runtime-discover",
+        help="Capture live DNS/SNI/HTTP hosts while command runs, then normalize/filter domains.",
+    )
+    runtime_discover_p.add_argument("--cmd", required=True, help="Command to run (quote as one string).")
+    runtime_discover_p.add_argument(
+        "--run-as-user",
+        help="Run command as this OS user (default: sudo invoking user if available).",
+    )
+    runtime_discover_p.add_argument(
+        "--duration",
+        type=int,
+        default=60,
+        help="Capture duration in seconds (5..1800).",
+    )
+    runtime_discover_p.add_argument(
+        "--startup-delay",
+        type=float,
+        default=2.0,
+        help="Seconds to wait after tshark start before launching command.",
+    )
+    runtime_discover_p.add_argument(
+        "--capture-interface",
+        default="any",
+        help="Capture interface passed to tshark (default: any).",
+    )
+    runtime_discover_p.add_argument(
+        "--include",
+        action="append",
+        help="Regex include filter for domain list (repeat option).",
+    )
+    runtime_discover_p.add_argument(
+        "--exclude",
+        action="append",
+        help="Regex exclude filter for domain list (repeat option).",
+    )
+    runtime_discover_p.add_argument("--json", action="store_true", help="Output JSON.")
+
+    runtime_autofill_p = sub.add_parser(
+        "resource-runtime-autofill",
+        help="Run runtime capture and auto-merge discovered domains into resource, then optionally apply.",
+    )
+    runtime_autofill_p.add_argument("--resource", required=True, help="Resource name.")
+    runtime_autofill_p.add_argument("--cmd", required=True, help="Command to run (quote as one string).")
+    runtime_autofill_p.add_argument(
+        "--run-as-user",
+        help="Run command as this OS user (default: sudo invoking user if available).",
+    )
+    runtime_autofill_p.add_argument(
+        "--duration",
+        type=int,
+        default=60,
+        help="Capture duration in seconds (5..1800).",
+    )
+    runtime_autofill_p.add_argument(
+        "--startup-delay",
+        type=float,
+        default=2.0,
+        help="Seconds to wait after tshark start before launching command.",
+    )
+    runtime_autofill_p.add_argument(
+        "--capture-interface",
+        default="any",
+        help="Capture interface passed to tshark (default: any).",
+    )
+    runtime_autofill_p.add_argument(
+        "--include",
+        action="append",
+        help="Regex include filter for domain list (repeat option).",
+    )
+    runtime_autofill_p.add_argument(
+        "--exclude",
+        action="append",
+        help="Regex exclude filter for domain list (repeat option).",
+    )
+    runtime_autofill_p.add_argument(
+        "--no-apply",
+        dest="run_apply",
+        action="store_false",
+        help="Do not apply rules after merge.",
+    )
+    runtime_autofill_p.add_argument("--json", action="store_true", help="Output JSON.")
+    runtime_autofill_p.set_defaults(run_apply=True)
+
     probe_p = sub.add_parser("probe", help="Run connectivity probe.")
     probe_p.add_argument("--resource", help="Resource name (default: first profile).")
     probe_p.add_argument("--domain", help="Specific domain to probe.")
@@ -119,6 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
     access_p = sub.add_parser("access-check", help="Simple access verdict for resource.")
     access_p.add_argument("--resource", required=True, help="Resource name.")
     access_p.add_argument("--domain", help="Specific domain to check.")
+    access_p.add_argument(
+        "--all-domains",
+        action="store_true",
+        help="Probe all configured domains of this resource.",
+    )
     access_p.add_argument("--timeout", type=int, default=8, help="Probe timeout in seconds.")
 
     add_p = sub.add_parser("resource-add", help="Add or replace generic resource profile.")
@@ -161,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch_p.add_argument(
         "--debounce",
         type=float,
-        default=1.0,
+        default=0.2,
         help="Minimum seconds between apply runs when many events arrive.",
     )
 
@@ -227,9 +390,18 @@ def main(argv: list[str] | None = None) -> int:
                 vpn_interface=args.vpn_interface,
                 install_bin=args.install_bin,
                 timeout=args.timeout,
+                autodiscover=args.autodiscover,
+                discovery_depth=args.discovery_depth,
+                include_external=args.include_external,
             )
             verify = result["verify"]
             print(f"Preset: {result['preset']}")
+            if result.get("sync_report") is not None:
+                sync = result["sync_report"]
+                print(
+                    f"Autofill: changed={str(sync['changed']).lower()} "
+                    f"new_domains={len(sync['new_domains'])} total={sync['domains_total']}"
+                )
             print(f"Bootstrap: {'PASS' if verify['passed'] else 'FAIL'}")
             if verify["issues"]:
                 for issue in verify["issues"]:
@@ -318,6 +490,146 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Counts: {report['apply_report']['counts']}")
             return 0
 
+        if args.command == "discover":
+            if args.resource:
+                report = svc.discover_resource_domains(
+                    resource_name=args.resource,
+                    max_depth=args.depth,
+                    include_external=args.include_external,
+                    dns_check=args.dns_check,
+                )
+            else:
+                report = svc.discover_preset_domains(
+                    preset_name=args.preset,
+                    max_depth=args.depth,
+                    include_external=args.include_external,
+                    dns_check=args.dns_check,
+                )
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                source = report.get("resource") or report.get("preset")
+                print(f"Source: {source}")
+                print(f"Domains discovered: {len(report['domains'])}")
+                print(f"New domains: {len(report['new_domains'])}")
+                if report["new_domains"]:
+                    print("New domain list:")
+                    for domain in report["new_domains"]:
+                        print(f"  - {domain}")
+                if report["unresolved_domains"]:
+                    print(f"Unresolved: {len(report['unresolved_domains'])}")
+                if report["failures"]:
+                    print(f"Crawl warnings: {len(report['failures'])}")
+            return 0
+
+        if args.command == "resource-autofill":
+            report = svc.autofill_resource_domains(
+                resource_name=args.resource,
+                max_depth=args.depth,
+                include_external=args.include_external,
+                dns_check=args.dns_check,
+                run_apply=args.run_apply,
+            )
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(
+                    f"Resource autofill {report['resource']}: "
+                    f"changed={str(report['changed']).lower()} "
+                    f"new_domains={len(report['new_domains'])} total={report['domains_total']}"
+                )
+                if report["new_domains"]:
+                    print("Added domains:")
+                    for domain in report["new_domains"]:
+                        print(f"  - {domain}")
+            return 0
+
+        if args.command == "sync":
+            report = svc.sync(
+                resources=args.resource,
+                max_depth=args.depth,
+                include_external=args.include_external,
+                dns_check=args.dns_check,
+                run_apply=args.run_apply,
+                verify_timeout=args.verify_timeout,
+                check_access=args.check_access,
+                access_timeout=args.access_timeout,
+                access_all_domains=args.access_all_domains,
+            )
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(f"Sync: {'PASS' if report['passed'] else 'FAIL'}")
+                print(
+                    f"Resources: {len(report['resources'])} "
+                    f"changed={str(report['changed']).lower()} "
+                    f"changed_resources={report['changed_resources']} "
+                    f"added_domains={report['added_domains_total']}"
+                )
+                print(f"Apply run: {str(report['applied']).lower()}")
+                print(f"Verify: {'PASS' if report['verify']['passed'] else 'FAIL'}")
+                if report["verify"]["issues"]:
+                    for issue in report["verify"]["issues"]:
+                        print(f"Issue: {issue}")
+                if report["access_checked"]:
+                    print(
+                        f"Access check: {'PASS' if report['access_ok'] else 'FAIL'} "
+                        f"(all_domains={str(report['access_all_domains']).lower()})"
+                    )
+            return 0 if report["passed"] else 1
+
+        if args.command == "runtime-discover":
+            report = svc.runtime_discover(
+                command=args.cmd,
+                command_user=args.run_as_user,
+                duration=args.duration,
+                startup_delay=args.startup_delay,
+                capture_interface=args.capture_interface,
+                include_patterns=args.include,
+                exclude_patterns=args.exclude,
+            )
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(
+                    f"Runtime discovery: domains={report['domains_count']} "
+                    f"capture_lines={report['capture_lines']} "
+                    f"timed_out={str(report['command_timed_out']).lower()}"
+                )
+                if report["domains"]:
+                    print("Domains:")
+                    for domain in report["domains"]:
+                        print(f"  - {domain}")
+                if report["excluded_domains"]:
+                    print(f"Excluded domains: {len(report['excluded_domains'])}")
+            return 0
+
+        if args.command == "resource-runtime-autofill":
+            report = svc.runtime_autofill_resource(
+                resource_name=args.resource,
+                command=args.cmd,
+                command_user=args.run_as_user,
+                duration=args.duration,
+                startup_delay=args.startup_delay,
+                capture_interface=args.capture_interface,
+                include_patterns=args.include,
+                exclude_patterns=args.exclude,
+                run_apply=args.run_apply,
+            )
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(
+                    f"Runtime autofill {report['resource']}: "
+                    f"changed={str(report['changed']).lower()} "
+                    f"new_domains={len(report['new_domains'])} total={report['domains_total']}"
+                )
+                if report["new_domains"]:
+                    print("Added domains:")
+                    for domain in report["new_domains"]:
+                        print(f"  - {domain}")
+            return 0
+
         if args.command == "probe":
             report = svc.probe(
                 resource_name=args.resource,
@@ -333,13 +645,26 @@ def main(argv: list[str] | None = None) -> int:
                 resource_name=args.resource,
                 domain=args.domain,
                 timeout=args.timeout,
+                all_domains=args.all_domains,
             )
-            print(
-                f"Access check resource={report['resource']} mode={report['expected_mode']} "
-                f"vpn_reachable={str(report['vpn_reachable']).lower()} "
-                f"non_vpn_blocked={str(report['non_vpn_blocked']).lower()} "
-                f"result={'PASS' if report['access_ok'] else 'FAIL'}"
-            )
+            if report.get("all_domains"):
+                print(
+                    f"Access check resource={report['resource']} all_domains=true "
+                    f"checked={report['domains_checked']} "
+                    f"failed={len(report['failed_domains'])} "
+                    f"result={'PASS' if report['access_ok'] else 'FAIL'}"
+                )
+                if report["failed_domains"]:
+                    print("Failed domains:")
+                    for domain in report["failed_domains"]:
+                        print(f"  - {domain}")
+            else:
+                print(
+                    f"Access check resource={report['resource']} mode={report['expected_mode']} "
+                    f"vpn_reachable={str(report['vpn_reachable']).lower()} "
+                    f"non_vpn_blocked={str(report['non_vpn_blocked']).lower()} "
+                    f"result={'PASS' if report['access_ok'] else 'FAIL'}"
+                )
             return 0 if report["access_ok"] else 1
 
         if args.command == "resource-add":
