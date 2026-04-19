@@ -17,7 +17,7 @@ export default async function ConsoleLayout({
   const role = session.user.role || "VIEWER";
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
+    <div className="min-h-screen bg-muted/20 text-foreground">
       <Topbar
         name={session.user.name || "User"}
         email={session.user.email || "unknown"}

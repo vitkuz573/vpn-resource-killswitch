@@ -5,6 +5,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { parseResponse } from "@/lib/control-plane-client";
 
 type Props = {
@@ -311,10 +316,10 @@ export function ReplPageClient({ userRole }: Props) {
         fontSize: 13,
         lineHeight: 1.28,
         theme: {
-          background: "#0f172a",
+          background: "#0b0f19",
           foreground: "#e2e8f0",
-          cursor: "#38bdf8",
-          selectionBackground: "#334155",
+          cursor: "#8b95a7",
+          selectionBackground: "#253043",
         },
       });
 
@@ -381,103 +386,104 @@ export function ReplPageClient({ userRole }: Props) {
 
   return (
     <main className="grid grid-cols-12 gap-4">
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <Card className="col-span-12">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold">REPL</h1>
-            <p className="text-sm text-slate-600">Full PTY sessions powered by xterm + node-pty with live stream.</p>
+            <CardTitle className="text-2xl">REPL</CardTitle>
+            <CardDescription>Full PTY sessions powered by xterm + node-pty with live stream.</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void refreshSessions()}
-              disabled={loading}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-50"
-            >
+            <Button type="button" variant="outline" onClick={() => void refreshSessions()} disabled={loading}>
               Refresh sessions
-            </button>
-            <button
-              type="button"
-              onClick={() => void createSession()}
-              disabled={loading || !canUseRepl}
-              className="rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="button" onClick={() => void createSession()} disabled={loading || !canUseRepl}>
               New session
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="destructive"
               onClick={() => void closeCurrentSession()}
               disabled={loading || !selectedSessionId || !canUseRepl}
-              className="rounded-lg border border-rose-700 bg-rose-700 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
             >
               Close session
-            </button>
+            </Button>
           </div>
-        </div>
-      </section>
+        </CardHeader>
+      </Card>
 
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-3">
-        <h2 className="text-lg font-semibold">Session options</h2>
-        <div className="mt-3 space-y-3">
-          <label className="block text-sm font-medium text-slate-700">
-            Shell
-            <input
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+      <Card className="col-span-12 md:col-span-3">
+        <CardHeader>
+          <CardTitle>Session options</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="repl-shell">Shell</Label>
+            <Input
+              id="repl-shell"
               value={shellPath}
               onChange={(event) => setShellPath(event.target.value)}
               placeholder="/bin/bash"
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-700">
-            CWD
-            <input
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="repl-cwd">CWD</Label>
+            <Input
+              id="repl-cwd"
               value={cwdPath}
               onChange={(event) => setCwdPath(event.target.value)}
-              placeholder={"(home directory)"}
+              placeholder="(home directory)"
             />
-          </label>
-        </div>
+          </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Sessions</h2>
-        <div className="mt-3 max-h-[52vh] space-y-2 overflow-auto">
-          {sessions.length === 0 ? (
-            <p className="text-sm text-slate-600">No sessions yet.</p>
-          ) : (
-            sessions.map((session) => (
-              <button
-                key={session.id}
-                type="button"
-                onClick={() => void selectSession(session.id)}
-                className={
-                  selectedSessionId === session.id
-                    ? "w-full rounded-lg border border-cyan-700 bg-cyan-50 p-2 text-left"
-                    : "w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-left hover:bg-slate-100"
-                }
-              >
-                <p className="text-xs font-semibold text-slate-900">{session.id.slice(0, 8)}</p>
-                <p className="text-[11px] text-slate-600">{session.state}</p>
-                <p className="text-[11px] text-slate-500">{session.shell}</p>
-                <p className="truncate text-[11px] text-slate-500">{session.cwd}</p>
-                <p className="text-[11px] text-slate-500">{formatDate(session.updatedAt)}</p>
-              </button>
-            ))
-          )}
-        </div>
-      </section>
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold">Sessions</h2>
+            <div className="max-h-[52vh] space-y-2 overflow-auto pr-1">
+              {sessions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No sessions yet.</p>
+              ) : (
+                sessions.map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() => void selectSession(session.id)}
+                    className={
+                      selectedSessionId === session.id
+                        ? "w-full rounded-lg border border-primary/40 bg-primary/10 p-2 text-left"
+                        : "w-full rounded-lg border bg-muted/20 p-2 text-left hover:bg-muted/40"
+                    }
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-semibold">{session.id.slice(0, 8)}</p>
+                      <Badge variant={session.state === "running" ? "secondary" : "outline"}>
+                        {session.state}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">{session.shell}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">{session.cwd}</p>
+                    <p className="text-[11px] text-muted-foreground">{formatDate(session.updatedAt)}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-9">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Terminal</h2>
-          <p className="text-xs text-slate-600">{selectedSession ? `${selectedSession.shell} @ ${selectedSession.cwd}` : "No session selected"}</p>
-        </div>
+      <Card className="col-span-12 md:col-span-9">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle>Terminal</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            {selectedSession ? `${selectedSession.shell} @ ${selectedSession.cwd}` : "No session selected"}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-hidden rounded-lg border border-border bg-[#0b0f19]">
+            <div ref={terminalContainerRef} className="h-[70vh] min-h-[420px] w-full" />
+          </div>
 
-        <div className="mt-3 overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
-          <div ref={terminalContainerRef} className="h-[70vh] min-h-[420px] w-full" />
-        </div>
-
-        <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">{status}</p>
-      </section>
+          <p className="mt-3 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">{status}</p>
+        </CardContent>
+      </Card>
     </main>
   );
 }

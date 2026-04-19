@@ -4,6 +4,13 @@ import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
 type BootstrapState = {
   bootstrapRequired: boolean;
   usersCount: number;
@@ -125,126 +132,139 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 text-slate-900 md:p-8">
+    <main className="min-h-screen bg-muted/20 p-4 md:p-8">
       <div className="mx-auto grid w-full max-w-5xl gap-6 md:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">VRKS Control Plane</p>
-          <h1 className="mt-2 text-3xl font-bold">Sign in</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Authenticated access to VRKS operations, policies, presets, and live status.
-          </p>
+        <Card>
+          <CardHeader>
+            <Badge variant="secondary" className="w-fit">VRKS Control Plane</Badge>
+            <CardTitle className="mt-2 text-3xl">Sign in</CardTitle>
+            <CardDescription>
+              Authenticated access to runtime controls, policies, presets, and live system status.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={handleLogin}>
+              <div className="space-y-2">
+                <Label htmlFor="login-email">Email</Label>
+                <Input
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </div>
 
-          <form className="mt-6 space-y-3" onSubmit={handleLogin}>
-            <label className="block text-sm font-medium text-slate-700">
-              Email
-              <input
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none ring-cyan-500 focus:ring-2"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
-            </label>
+              <div className="space-y-2">
+                <Label htmlFor="login-password">Password</Label>
+                <Input
+                  id="login-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </div>
 
-            <label className="block text-sm font-medium text-slate-700">
-              Password
-              <input
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none ring-cyan-500 focus:ring-2"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-              />
-            </label>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading || bootstrapLoading || Boolean(bootstrap?.bootstrapRequired)}
+              >
+                {loading ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
 
-            <button
-              type="submit"
-              disabled={loading || bootstrapLoading || Boolean(bootstrap?.bootstrapRequired)}
-              className="w-full rounded-xl bg-cyan-700 px-4 py-2 font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
-          </form>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Login is disabled until bootstrap admin is created (first launch only).
+            </p>
 
-          <p className="mt-3 text-xs text-slate-500">
-            Login is disabled until bootstrap admin is created (first launch only).
-          </p>
+            {error ? (
+              <Alert variant="destructive" className="mt-4">
+                <AlertTitle>Authentication error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+          </CardContent>
+        </Card>
 
-          {error ? <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
-        </section>
+        <Card>
+          <CardHeader>
+            <Badge variant="outline" className="w-fit">Bootstrap</Badge>
+            <CardTitle className="mt-2 text-2xl">Initial admin</CardTitle>
+            <CardDescription>Provision the first account with ADMIN permissions.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {bootstrapLoading ? (
+              <p className="text-sm text-muted-foreground">Checking bootstrap state...</p>
+            ) : bootstrap?.bootstrapRequired ? (
+              <>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  No users found. Create the first <strong>ADMIN</strong> account.
+                </p>
+                <form className="space-y-4" onSubmit={handleBootstrap}>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-name">Name</Label>
+                    <Input
+                      id="admin-name"
+                      value={adminName}
+                      onChange={(event) => setAdminName(event.target.value)}
+                      required
+                    />
+                  </div>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Bootstrap</p>
-          <h2 className="mt-2 text-2xl font-bold">Initial admin</h2>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-email">Email</Label>
+                    <Input
+                      id="admin-email"
+                      type="email"
+                      value={adminEmail}
+                      onChange={(event) => setAdminEmail(event.target.value)}
+                      required
+                    />
+                  </div>
 
-          {bootstrapLoading ? (
-            <p className="mt-4 text-sm text-slate-600">Checking bootstrap state...</p>
-          ) : bootstrap?.bootstrapRequired ? (
-            <>
-              <p className="mt-2 text-sm text-slate-600">
-                No users found. Create the first <strong>ADMIN</strong> account.
-              </p>
-              <form className="mt-5 space-y-3" onSubmit={handleBootstrap}>
-                <label className="block text-sm font-medium text-slate-700">
-                  Name
-                  <input
-                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none ring-amber-500 focus:ring-2"
-                    value={adminName}
-                    onChange={(event) => setAdminName(event.target.value)}
-                    required
-                  />
-                </label>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-password">Password</Label>
+                    <Input
+                      id="admin-password"
+                      type="password"
+                      value={adminPassword}
+                      onChange={(event) => setAdminPassword(event.target.value)}
+                      minLength={10}
+                      required
+                    />
+                  </div>
 
-                <label className="block text-sm font-medium text-slate-700">
-                  Email
-                  <input
-                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none ring-amber-500 focus:ring-2"
-                    type="email"
-                    value={adminEmail}
-                    onChange={(event) => setAdminEmail(event.target.value)}
-                    required
-                  />
-                </label>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-password2">Confirm password</Label>
+                    <Input
+                      id="admin-password2"
+                      type="password"
+                      value={adminPassword2}
+                      onChange={(event) => setAdminPassword2(event.target.value)}
+                      minLength={10}
+                      required
+                    />
+                  </div>
 
-                <label className="block text-sm font-medium text-slate-700">
-                  Password
-                  <input
-                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none ring-amber-500 focus:ring-2"
-                    type="password"
-                    value={adminPassword}
-                    onChange={(event) => setAdminPassword(event.target.value)}
-                    minLength={10}
-                    required
-                  />
-                </label>
-
-                <label className="block text-sm font-medium text-slate-700">
-                  Confirm password
-                  <input
-                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none ring-amber-500 focus:ring-2"
-                    type="password"
-                    value={adminPassword2}
-                    onChange={(event) => setAdminPassword2(event.target.value)}
-                    minLength={10}
-                    required
-                  />
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full rounded-xl bg-amber-600 px-4 py-2 font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? "Creating admin..." : "Create admin"}
-                </button>
-              </form>
-            </>
-          ) : (
-            <p className="mt-4 text-sm text-emerald-700">Bootstrap completed. Users in system: {bootstrap?.usersCount ?? 0}</p>
-          )}
-        </section>
+                  <Button type="submit" className="w-full" disabled={loading}>
+                    {loading ? "Creating admin..." : "Create admin"}
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <Alert>
+                <AlertTitle>Bootstrap completed</AlertTitle>
+                <AlertDescription>
+                  Users in system: <strong>{bootstrap?.usersCount ?? 0}</strong>
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </main>
   );

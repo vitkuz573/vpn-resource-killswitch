@@ -2,6 +2,19 @@
 
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { downloadJson, parseResponse } from "@/lib/control-plane-client";
 
 type Props = {
@@ -158,100 +171,111 @@ export function ImportsPageClient({ userRole }: Props) {
 
   return (
     <main className="grid grid-cols-12 gap-4">
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <Card className="col-span-12">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold">Imports / Exports</h1>
-            <p className="text-sm text-slate-600">Bulk profile transport with validation and operational safeguards.</p>
+            <CardTitle className="text-2xl">Imports / Exports</CardTitle>
+            <CardDescription>
+              Bulk profile transport with validation and operational safeguards.
+            </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void runExport()}
-              disabled={loading}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-50"
-            >
+            <Button type="button" variant="outline" onClick={() => void runExport()} disabled={loading}>
               Export JSON
-            </button>
-            <button
-              type="button"
-              onClick={() => void runValidate()}
-              disabled={loading}
-              className="rounded-lg border border-sky-600 bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void runValidate()} disabled={loading}>
               Validate JSON
-            </button>
-            <button
-              type="button"
-              onClick={() => void runImport()}
-              disabled={loading || !isOperator}
-              className="rounded-lg border border-violet-700 bg-violet-700 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="button" onClick={() => void runImport()} disabled={loading || !isOperator}>
               Import JSON
-            </button>
+            </Button>
           </div>
-        </div>
-      </section>
+        </CardHeader>
+      </Card>
 
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-8">
-        <div className="grid gap-3 md:grid-cols-4">
-          <label className="text-sm font-medium text-slate-700">
-            Import mode
-            <select
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              value={importMode}
-              onChange={(event) => setImportMode(event.target.value as ImportMode)}
-            >
-              <option value="merge">merge (upsert only)</option>
-              <option value="replace_all">replace_all (remove missing)</option>
-            </select>
-          </label>
+      <Card className="col-span-12 md:col-span-8">
+        <CardHeader>
+          <CardTitle>Import settings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="space-y-2">
+              <Label>Import mode</Label>
+              <Select
+                value={importMode}
+                onValueChange={(value) => {
+                  if (!value) {
+                    return;
+                  }
+                  setImportMode(value as ImportMode);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="merge">merge (upsert only)</SelectItem>
+                  <SelectItem value="replace_all">replace_all (remove missing)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 md:mt-6">
-            <input type="checkbox" checked={importRunApply} onChange={(event) => setImportRunApply(event.target.checked)} />
-            run apply
-          </label>
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 md:mt-7">
+              <Checkbox
+                checked={importRunApply}
+                onCheckedChange={(value) => setImportRunApply(Boolean(value))}
+                id="import-run-apply"
+              />
+              <Label htmlFor="import-run-apply">run apply</Label>
+            </div>
 
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 md:mt-6">
-            <input type="checkbox" checked={importRunVerify} onChange={(event) => setImportRunVerify(event.target.checked)} />
-            run verify
-          </label>
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 md:mt-7">
+              <Checkbox
+                checked={importRunVerify}
+                onCheckedChange={(value) => setImportRunVerify(Boolean(value))}
+                id="import-run-verify"
+              />
+              <Label htmlFor="import-run-verify">run verify</Label>
+            </div>
 
-          <label className="text-sm font-medium text-slate-700">
-            Verify timeout
-            <input
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              type="number"
-              min={3}
-              max={60}
-              value={importVerifyTimeout}
-              onChange={(event) => setImportVerifyTimeout(Number(event.target.value) || 8)}
+            <div className="space-y-2">
+              <Label htmlFor="import-verify-timeout">Verify timeout</Label>
+              <Input
+                id="import-verify-timeout"
+                type="number"
+                min={3}
+                max={60}
+                value={importVerifyTimeout}
+                onChange={(event) => setImportVerifyTimeout(Number(event.target.value) || 8)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="import-json">Import payload (JSON)</Label>
+            <Textarea
+              id="import-json"
+              className="min-h-72 font-mono text-xs"
+              value={importJson}
+              onChange={(event) => setImportJson(event.target.value)}
+              placeholder="Paste exported JSON or array of resources"
             />
-          </label>
-        </div>
+          </div>
+        </CardContent>
+      </Card>
 
-        <label className="mt-3 block text-sm font-medium text-slate-700">
-          Import payload (JSON)
-          <textarea
-            className="mt-1 min-h-72 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
-            value={importJson}
-            onChange={(event) => setImportJson(event.target.value)}
-            placeholder="Paste exported JSON or array of resources"
-          />
-        </label>
-      </section>
-
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-4">
-        <h2 className="text-lg font-semibold">Validation preview</h2>
-        <textarea
-          className="mt-3 min-h-56 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-xs"
-          value={validationOutput}
-          readOnly
-        />
-
-        <h2 className="mt-4 text-lg font-semibold">Output</h2>
-        <pre className="mt-3 max-h-56 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{output}</pre>
-      </section>
+      <Card className="col-span-12 md:col-span-4">
+        <CardHeader>
+          <CardTitle>Validation preview</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Textarea className="min-h-56 font-mono text-xs" value={validationOutput} readOnly />
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Output</h3>
+            <pre className="max-h-56 overflow-auto rounded-lg border bg-muted/50 p-3 text-xs">{output}</pre>
+          </div>
+        </CardContent>
+      </Card>
     </main>
   );
 }

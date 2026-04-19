@@ -1,4 +1,4 @@
-# VRKS Control Plane (Next.js + TypeScript + Tailwind)
+# VRKS Control Plane (Next.js + TypeScript + Tailwind + shadcn/ui)
 
 Modern authenticated control plane for VRKS.
 
@@ -7,6 +7,7 @@ Modern authenticated control plane for VRKS.
 - Next.js 16 (App Router)
 - TypeScript
 - Tailwind CSS 4
+- shadcn/ui components (`src/components/ui/*`)
 - Auth.js (`next-auth` v5 beta, Credentials flow)
 - Prisma + SQLite (users, roles, audit logs)
 

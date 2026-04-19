@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
 type Props = {
   role: string;
 };
@@ -41,7 +44,7 @@ export function ConsoleNav({ role }: Props) {
   });
 
   return (
-    <nav className="border-b border-slate-200 bg-slate-50">
+    <nav className="border-b bg-muted/40">
       <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-2 px-4 py-2 md:px-6">
         {visibleItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -49,11 +52,10 @@ export function ConsoleNav({ role }: Props) {
             <Link
               key={item.href}
               href={item.href}
-              className={
-                active
-                  ? "rounded-lg border border-cyan-700 bg-cyan-700 px-3 py-1.5 text-sm font-semibold text-white"
-                  : "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              }
+              className={cn(
+                buttonVariants({ variant: active ? "default" : "outline", size: "sm" }),
+                "h-8",
+              )}
             >
               {item.label}
             </Link>

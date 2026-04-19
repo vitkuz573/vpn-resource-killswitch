@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 import { parseResponse } from "@/lib/control-plane-client";
 
 type Props = {
@@ -17,6 +22,21 @@ type RuntimeManageAction =
   | "disable"
   | "enable-now"
   | "disable-now";
+
+type RuntimeOperation =
+  | {
+      operation: "manage_unit";
+      unit: RuntimeUnit;
+      action: RuntimeManageAction;
+    }
+  | {
+      operation: "disable_rules";
+    }
+  | {
+      operation: "teardown";
+      purge: boolean;
+      removeBin: boolean;
+    };
 
 export function OverviewPageClient({ userRole }: Props) {
   const [loading, setLoading] = useState(false);
@@ -135,21 +155,6 @@ export function OverviewPageClient({ userRole }: Props) {
     }
   }
 
-  type RuntimeOperation =
-    | {
-        operation: "manage_unit";
-        unit: RuntimeUnit;
-        action: RuntimeManageAction;
-      }
-    | {
-        operation: "disable_rules";
-      }
-    | {
-        operation: "teardown";
-        purge: boolean;
-        removeBin: boolean;
-      };
-
   async function runRuntimeOperation(payload: RuntimeOperation, label: string): Promise<void> {
     if (!isOperator) {
       return;
@@ -186,259 +191,267 @@ export function OverviewPageClient({ userRole }: Props) {
 
   return (
     <main className="grid grid-cols-12 gap-4">
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <Card className="col-span-12">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold">Overview</h1>
-            <p className="text-sm text-slate-600">Runtime health, apply, and verification controls.</p>
+            <CardTitle className="text-2xl">Overview</CardTitle>
+            <CardDescription>Runtime health, apply, and verification controls.</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void runRefresh()}
-              disabled={loading}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-50"
-            >
+            <Button type="button" variant="outline" onClick={() => void runRefresh()} disabled={loading}>
               Refresh
-            </button>
-            <button
-              type="button"
-              onClick={() => void runVerify()}
-              disabled={loading}
-              className="rounded-lg border border-cyan-700 bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void runVerify()} disabled={loading}>
               Verify
-            </button>
-            <button
-              type="button"
-              onClick={() => void runApply()}
-              disabled={loading || !isOperator}
-              className="rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="button" onClick={() => void runApply()} disabled={loading || !isOperator}>
               Apply
-            </button>
+            </Button>
           </div>
-        </div>
-      </section>
+        </CardHeader>
+      </Card>
 
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-6">
-        <h2 className="text-lg font-semibold">Runtime status</h2>
-        <dl className="mt-3 space-y-2 text-sm">
+      <Card className="col-span-12 md:col-span-6">
+        <CardHeader>
+          <CardTitle>Runtime status</CardTitle>
+          <CardDescription>Current runtime and firewall state.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
           {statusRows.map(([label, value]) => (
-            <div key={label} className="flex justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-              <dt className="font-medium text-slate-600">{label}</dt>
-              <dd className="text-right font-semibold text-slate-800">{value}</dd>
+            <div key={label} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+              <p className="text-sm text-muted-foreground">{label}</p>
+              <Badge variant="outline" className="font-mono text-xs">{value}</Badge>
             </div>
           ))}
-        </dl>
-      </section>
+        </CardContent>
+      </Card>
 
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-6">
-        <h2 className="text-lg font-semibold">Runtime management</h2>
-
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Global</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                void runRuntimeOperation(
-                  { operation: "manage_unit", unit: "all", action: "enable-now" },
-                  "Runtime stack enabled",
-                )
-              }
-              disabled={loading || !isOperator}
-              className="rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-            >
-              Enable all
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                void runRuntimeOperation(
-                  { operation: "manage_unit", unit: "all", action: "restart" },
-                  "Runtime stack restarted",
-                )
-              }
-              disabled={loading || !isOperator}
-              className="rounded-lg border border-cyan-700 bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-800 disabled:opacity-50"
-            >
-              Restart all
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                void runRuntimeOperation(
-                  { operation: "manage_unit", unit: "all", action: "disable-now" },
-                  "Runtime stack disabled",
-                )
-              }
-              disabled={loading || !isOperator}
-              className="rounded-lg border border-amber-700 bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
-            >
-              Disable all
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                void runRuntimeOperation(
-                  { operation: "disable_rules" },
-                  "Rules disabled (nft table removed)",
-                )
-              }
-              disabled={loading || !isOperator}
-              className="rounded-lg border border-rose-700 bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
-            >
-              Disable rules
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-          {unitCards.map((unit) => (
-            <article key={unit.key} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900">{unit.label}</h3>
-                  <p className="text-xs text-slate-600">{unit.description}</p>
-                </div>
-                <div className="text-right text-xs text-slate-700">
-                  <p>
-                    <span className="font-semibold">enabled:</span> {unit.enabled}
-                  </p>
-                  <p>
-                    <span className="font-semibold">active:</span> {unit.active}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    void runRuntimeOperation(
-                      { operation: "manage_unit", unit: unit.key, action: "start" },
-                      `${unit.label}: started`,
-                    )
-                  }
-                  disabled={loading || !isOperator}
-                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50"
-                >
-                  Start
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void runRuntimeOperation(
-                      { operation: "manage_unit", unit: unit.key, action: "stop" },
-                      `${unit.label}: stopped`,
-                    )
-                  }
-                  disabled={loading || !isOperator}
-                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50"
-                >
-                  Stop
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void runRuntimeOperation(
-                      { operation: "manage_unit", unit: unit.key, action: "restart" },
-                      `${unit.label}: restarted`,
-                    )
-                  }
-                  disabled={loading || !isOperator}
-                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50"
-                >
-                  Restart
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void runRuntimeOperation(
-                      {
-                        operation: "manage_unit",
-                        unit: unit.key,
-                        action: "enable-now",
-                      },
-                      `${unit.label}: enabled`,
-                    )
-                  }
-                  disabled={loading || !isOperator}
-                  className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-                >
-                  Enable
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void runRuntimeOperation(
-                      {
-                        operation: "manage_unit",
-                        unit: unit.key,
-                        action: "disable-now",
-                      },
-                      `${unit.label}: disabled`,
-                    )
-                  }
-                  disabled={loading || !isOperator}
-                  className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                >
-                  Disable
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-
-        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Danger zone</p>
-          <p className="mt-1 text-xs text-rose-700">Teardown removes VRKS runtime units and stops protection.</p>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-rose-800">
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={teardownPurge}
-                onChange={(event) => setTeardownPurge(event.target.checked)}
-              />
-              purge config/state
-            </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={teardownRemoveBin}
-                onChange={(event) => setTeardownRemoveBin(event.target.checked)}
-              />
-              remove runtime binary
-            </label>
-            <button
-              type="button"
-              onClick={() => {
-                if (!window.confirm("Run VRKS teardown? This will stop runtime protection.")) {
-                  return;
+      <Card className="col-span-12 md:col-span-6">
+        <CardHeader>
+          <CardTitle>Runtime management</CardTitle>
+          <CardDescription>Manage runtime units without leaving the control plane.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Global</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() =>
+                  void runRuntimeOperation(
+                    { operation: "manage_unit", unit: "all", action: "enable-now" },
+                    "Runtime stack enabled",
+                  )
                 }
-                void runRuntimeOperation(
-                  {
-                    operation: "teardown",
-                    purge: teardownPurge,
-                    removeBin: teardownRemoveBin,
-                  },
-                  "Runtime teardown completed",
-                );
-              }}
-              disabled={loading || !isOperator}
-              className="rounded-md border border-rose-700 bg-rose-700 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
-            >
-              Run teardown
-            </button>
+                disabled={loading || !isOperator}
+              >
+                Enable all
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  void runRuntimeOperation(
+                    { operation: "manage_unit", unit: "all", action: "restart" },
+                    "Runtime stack restarted",
+                  )
+                }
+                disabled={loading || !isOperator}
+              >
+                Restart all
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  void runRuntimeOperation(
+                    { operation: "manage_unit", unit: "all", action: "disable-now" },
+                    "Runtime stack disabled",
+                  )
+                }
+                disabled={loading || !isOperator}
+              >
+                Disable all
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() =>
+                  void runRuntimeOperation(
+                    { operation: "disable_rules" },
+                    "Rules disabled (nft table removed)",
+                  )
+                }
+                disabled={loading || !isOperator}
+              >
+                Disable rules
+              </Button>
+            </div>
           </div>
-        </div>
-      </section>
 
-      <section className="col-span-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold">Output</h2>
-        <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{output}</pre>
-      </section>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {unitCards.map((unit) => (
+              <div key={unit.key} className="rounded-lg border bg-muted/20 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold">{unit.label}</h3>
+                    <p className="text-xs text-muted-foreground">{unit.description}</p>
+                  </div>
+                  <div className="space-y-1 text-right text-xs">
+                    <p>
+                      <span className="font-semibold">enabled:</span> {unit.enabled}
+                    </p>
+                    <p>
+                      <span className="font-semibold">active:</span> {unit.active}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() =>
+                      void runRuntimeOperation(
+                        { operation: "manage_unit", unit: unit.key, action: "start" },
+                        `${unit.label}: started`,
+                      )
+                    }
+                    disabled={loading || !isOperator}
+                  >
+                    Start
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() =>
+                      void runRuntimeOperation(
+                        { operation: "manage_unit", unit: unit.key, action: "stop" },
+                        `${unit.label}: stopped`,
+                      )
+                    }
+                    disabled={loading || !isOperator}
+                  >
+                    Stop
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() =>
+                      void runRuntimeOperation(
+                        { operation: "manage_unit", unit: unit.key, action: "restart" },
+                        `${unit.label}: restarted`,
+                      )
+                    }
+                    disabled={loading || !isOperator}
+                  >
+                    Restart
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
+                    onClick={() =>
+                      void runRuntimeOperation(
+                        {
+                          operation: "manage_unit",
+                          unit: unit.key,
+                          action: "enable-now",
+                        },
+                        `${unit.label}: enabled`,
+                      )
+                    }
+                    disabled={loading || !isOperator}
+                  >
+                    Enable
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
+                    onClick={() =>
+                      void runRuntimeOperation(
+                        {
+                          operation: "manage_unit",
+                          unit: unit.key,
+                          action: "disable-now",
+                        },
+                        `${unit.label}: disabled`,
+                      )
+                    }
+                    disabled={loading || !isOperator}
+                  >
+                    Disable
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</p>
+            <p className="text-xs text-muted-foreground">
+              Teardown removes VRKS runtime units and stops protection.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={teardownPurge}
+                  onCheckedChange={(value) => setTeardownPurge(Boolean(value))}
+                  id="teardown-purge"
+                />
+                <span>purge config/state</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={teardownRemoveBin}
+                  onCheckedChange={(value) => setTeardownRemoveBin(Boolean(value))}
+                  id="teardown-remove-bin"
+                />
+                <span>remove runtime binary</span>
+              </label>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  if (!window.confirm("Run VRKS teardown? This will stop runtime protection.")) {
+                    return;
+                  }
+                  void runRuntimeOperation(
+                    {
+                      operation: "teardown",
+                      purge: teardownPurge,
+                      removeBin: teardownRemoveBin,
+                    },
+                    "Runtime teardown completed",
+                  );
+                }}
+                disabled={loading || !isOperator}
+              >
+                Run teardown
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="col-span-12">
+        <CardHeader>
+          <CardTitle>Output</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <pre className="max-h-96 overflow-auto rounded-lg border bg-muted/50 p-3 text-xs">{output}</pre>
+        </CardContent>
+      </Card>
     </main>
   );
 }
