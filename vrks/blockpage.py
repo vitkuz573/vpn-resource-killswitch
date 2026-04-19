@@ -11,9 +11,6 @@ from . import storage
 from .network import normalize_domain, normalize_resource_name
 
 
-GUI_URL = "http://127.0.0.1:8877/"
-
-
 def _resource_for_host(host: str) -> str | None:
     try:
         config = storage.load_config()
@@ -394,7 +391,6 @@ def _blocked_page_html(
 
       <div class="actions">
         <button class="btn btn-primary" onclick="window.location.reload()">Retry Request</button>
-        <a class="btn btn-secondary" href="{html.escape(GUI_URL)}" target="_blank" rel="noopener">Open VRKS GUI</a>
         <button class="btn btn-ghost" onclick="copyDiagnostics()">Copy Diagnostics</button>
       </div>
       <p id="status" class="status" aria-live="polite"></p>

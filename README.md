@@ -14,14 +14,13 @@ Core logic is generic; service-specific behavior comes from external presets.
   - `blocked_context_keywords` (substring deny-list over VPN context: country/region/city/org/isp/domain/ip)
 - If policy mismatch happens, resource is hard-blocked on all interfaces.
 - Works with any VPN provider because enforcement is interface-based (`tun`, `wg`, etc.).
-- Includes CLI, legacy Python GUI, and modern Next.js control plane.
+- Includes CLI and modern Next.js control plane.
 - Instant reaction path: realtime `watch` service + NetworkManager dispatcher + periodic timer.
 - Transition notifications: desktop/syslog alerts when a resource enters `hard_block` or is restored.
 
 ## Architecture
 
 - `vrks/cli.py`: CLI commands.
-- `vrks/gui.py`: local web dashboard.
 - `vrks/service.py`: orchestration layer (setup/apply/probe/resource management).
 - `vrks/network.py`: interface detection, DNS resolve, egress country/server lookup, probe.
 - `vrks/discovery.py`: domain crawler/extractor for automatic coverage expansion.
@@ -72,14 +71,6 @@ sudo python3 vrks.py resource-add \
 
 sudo python3 vrks.py apply
 ```
-
-## GUI
-
-```bash
-sudo python3 vrks.py gui --host 127.0.0.1 --port 8877
-```
-
-Then open `http://127.0.0.1:8877`.
 
 ## Next.js Control Plane (Recommended)
 

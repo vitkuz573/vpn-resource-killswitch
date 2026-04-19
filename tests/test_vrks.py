@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import socket
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.error import URLError
 from unittest import mock
 
@@ -13,6 +15,7 @@ from vrks.models import AppConfig, ResourcePolicy, ResourceProfile, VpnContext
 from vrks.network import normalize_domain, normalize_domains, resolve_domains
 from vrks.presets import get_preset, list_presets
 from vrks.service import KillSwitchService, _build_transition_events, _policy_match
+from vrks import storage
 from vrks.traffic import extract_domains_from_capture, filter_domains, parse_command
 
 
@@ -386,6 +389,24 @@ class BlockPageTextTests(unittest.TestCase):
             "Policy trigger",
             _humanize_reason("custom_reason_value"),
         )
+
+
+class StorageTests(unittest.TestCase):
+    def test_load_state_recovers_first_json_object_on_trailing_bytes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text('{"vpn_interface":"amn0","vpn_up":true}\n}{broken', encoding="utf-8")
+            with mock.patch("vrks.storage.STATE_PATH", state_path):
+                loaded = storage.load_state()
+        self.assertEqual(loaded, {"vpn_interface": "amn0", "vpn_up": True})
+
+    def test_load_state_returns_none_for_unrecoverable_json(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text("not json at all", encoding="utf-8")
+            with mock.patch("vrks.storage.STATE_PATH", state_path):
+                loaded = storage.load_state()
+        self.assertIsNone(loaded)
 
 
 if __name__ == "__main__":

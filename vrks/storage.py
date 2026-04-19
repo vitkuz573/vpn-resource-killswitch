@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .constants import CONFIG_PATH, CONFIG_VERSION, DEFAULT_PROFILE_NAME, STATE_PATH
@@ -53,29 +55,58 @@ def load_config() -> AppConfig:
     return AppConfig(version=version, vpn_interface=vpn_interface, resources=resources)
 
 
+def _atomic_write_json(path: Path, payload: dict[str, Any], *, mode: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{os.urandom(4).hex()}")
+    text = json.dumps(payload, indent=2) + "\n"
+    temp_path.write_text(text, encoding="utf-8")
+    temp_path.chmod(mode)
+    temp_path.replace(path)
+
+
 def save_config(config: AppConfig) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": CONFIG_VERSION,
         "vpn_interface": config.vpn_interface,
         "resources": [asdict(resource) for resource in config.resources],
     }
-    CONFIG_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    CONFIG_PATH.chmod(0o644)
+    _atomic_write_json(CONFIG_PATH, payload, mode=0o644)
+
+
+def _parse_json_best_effort(raw: str) -> dict[str, Any] | None:
+    if not raw.strip():
+        return None
+
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    # Recover the first valid JSON object when trailing bytes are present.
+    decoder = json.JSONDecoder()
+    start = raw.find("{")
+    if start < 0:
+        return None
+    candidate = raw[start:]
+    try:
+        parsed, _ = decoder.raw_decode(candidate)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def load_state() -> dict[str, Any] | None:
     if not STATE_PATH.exists():
         return None
-    return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    raw = STATE_PATH.read_text(encoding="utf-8")
+    return _parse_json_best_effort(raw)
 
 
 def save_state(payload: dict[str, Any]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     data = dict(payload)
     data["updated_at"] = datetime.now(UTC).isoformat()
-    STATE_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    STATE_PATH.chmod(0o644)
+    _atomic_write_json(STATE_PATH, data, mode=0o644)
 
 
 def context_to_dict(context: VpnContext | None) -> dict[str, Any] | None:

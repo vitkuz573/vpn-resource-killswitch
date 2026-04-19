@@ -8,7 +8,6 @@ from .blockpage import run_blockpage_server
 from .blockpage_tls import run_blockpage_tls_server
 from .constants import BLOCK_PAGE_PORT, TLS_BLOCK_PAGE_PORT
 from .errors import CLIError
-from .gui import launch_gui
 from .mitm_ca import ensure_local_ca, local_ca_status, trust_local_ca
 from .service import KillSwitchService
 
@@ -342,10 +341,6 @@ def build_parser() -> argparse.ArgumentParser:
     teardown_p = sub.add_parser("teardown", help="Remove systemd units and nft table.")
     teardown_p.add_argument("--purge", action="store_true", help="Also delete config/state.")
     teardown_p.add_argument("--remove-bin", action="store_true", help="Also remove /usr/local/bin/vrks.")
-
-    gui_p = sub.add_parser("gui", help="Run local web GUI.")
-    gui_p.add_argument("--host", default="127.0.0.1")
-    gui_p.add_argument("--port", type=int, default=8877)
 
     blockpage_p = sub.add_parser("blockpage", help="Run local browser block-page server.")
     blockpage_p.add_argument("--host", default="127.0.0.1")
@@ -799,10 +794,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "teardown":
             svc.teardown(purge=args.purge, remove_bin=args.remove_bin)
             print("Teardown completed.")
-            return 0
-
-        if args.command == "gui":
-            launch_gui(svc, host=args.host, port=args.port)
             return 0
 
         if args.command == "blockpage":
