@@ -6,7 +6,7 @@ import sys
 
 from .blockpage import run_blockpage_server
 from .blockpage_tls import run_blockpage_tls_server
-from .constants import TLS_BLOCK_PAGE_PORT
+from .constants import BLOCK_PAGE_PORT, TLS_BLOCK_PAGE_PORT
 from .errors import CLIError
 from .gui import launch_gui
 from .mitm_ca import ensure_local_ca, local_ca_status, trust_local_ca
@@ -349,7 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     blockpage_p = sub.add_parser("blockpage", help="Run local browser block-page server.")
     blockpage_p.add_argument("--host", default="127.0.0.1")
-    blockpage_p.add_argument("--port", type=int, default=8765)
+    blockpage_p.add_argument("--port", type=int, default=BLOCK_PAGE_PORT)
 
     blockpage_tls_p = sub.add_parser("blockpage-tls", help="Run local TLS block-page server (HTTPS MITM).")
     blockpage_tls_p.add_argument("--host", default="127.0.0.1")

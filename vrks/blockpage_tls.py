@@ -4,9 +4,8 @@ import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
 
-from .blockpage import _blocked_page_html, _resource_for_host, _sanitize_host, _state_for_resource
+from .blockpage import _build_block_body, _send_block_headers
 from .mitm_ca import issue_server_cert
 from .network import normalize_domain
 
@@ -51,27 +50,23 @@ class _TlsBlockPageServer(ThreadingHTTPServer):
 def run_blockpage_tls_server(*, host: str, port: int) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            request_host = _sanitize_host(self.headers.get("Host", ""))
-            resource_name = _resource_for_host(request_host)
-            mode, reason = _state_for_resource(resource_name)
-            body = _blocked_page_html(
-                host=request_host,
-                path=parsed.path or "/",
-                resource=resource_name,
-                mode=mode,
-                reason=reason,
+            body = _build_block_body(
+                raw_path=self.path,
+                raw_host=self.headers.get("Host", ""),
+                user_agent=self.headers.get("User-Agent", ""),
                 transport="https",
-            ).encode("utf-8")
-            self.send_response(451)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
+            )
+            _send_block_headers(self, content_length=len(body))
             self.wfile.write(body)
 
         def do_HEAD(self) -> None:  # noqa: N802
-            self.send_response(451)
-            self.end_headers()
+            body = _build_block_body(
+                raw_path=self.path,
+                raw_host=self.headers.get("Host", ""),
+                user_agent=self.headers.get("User-Agent", ""),
+                transport="https",
+            )
+            _send_block_headers(self, content_length=len(body))
 
         def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
             return

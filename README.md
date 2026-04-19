@@ -109,8 +109,8 @@ Events are also stored in state (`/var/lib/vpn-resource-killswitch/state.json`, 
 
 VRKS runs two local block-page services and redirects blocked traffic to them:
 
-- HTTP service: `vpn-resource-killswitch-blockpage.service` (`http://127.0.0.1:8765`)
-- HTTPS service: `vpn-resource-killswitch-blockpage-tls.service` (`https://127.0.0.1:8766`)
+- HTTP service: `vpn-resource-killswitch-blockpage.service` (`http://127.0.0.1:18765`)
+- HTTPS service: `vpn-resource-killswitch-blockpage-tls.service` (`https://127.0.0.1:18766`)
 - Block response code: `451`
 
 For full HTTPS block page (without browser certificate warnings), initialize and trust local CA:

@@ -5,6 +5,7 @@ import unittest
 from urllib.error import URLError
 from unittest import mock
 
+from vrks.blockpage import _humanize_mode, _humanize_reason
 from vrks.discovery import discover_domains
 from vrks.errors import CLIError
 from vrks.firewall import build_nft_rules
@@ -362,6 +363,29 @@ class AccessCheckTests(unittest.TestCase):
         )
         self.assertTrue(report["access_ok"])
         self.assertTrue(report["vpn_blocked"])
+
+
+class BlockPageTextTests(unittest.TestCase):
+    def test_humanize_mode(self) -> None:
+        self.assertEqual(_humanize_mode("hard_block"), "hard_block: blocked on all interfaces")
+        self.assertEqual(
+            _humanize_mode("vpn_only"),
+            "vpn_only: allowed only through VPN interface",
+        )
+
+    def test_humanize_reason_known_patterns(self) -> None:
+        self.assertIn(
+            "not in allowed_countries",
+            _humanize_reason("country_not_allowed(current=US)"),
+        )
+        self.assertIn(
+            "blocked keyword",
+            _humanize_reason("context_keyword_blocked(keyword=crimea)"),
+        )
+        self.assertIn(
+            "Policy trigger",
+            _humanize_reason("custom_reason_value"),
+        )
 
 
 if __name__ == "__main__":
