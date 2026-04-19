@@ -406,7 +406,9 @@ export function ProfilesPageClient({ userRole }: Props) {
                         {item.hasPolicyConstraints ? "restricted" : "open"}
                       </span>
                     </div>
-                    <p className="mt-1 text-xs text-slate-600">{policySummary(item.policy)}</p>
+                    <p className="mt-1 text-xs text-slate-600 break-words [overflow-wrap:anywhere]">
+                      {policySummary(item.policy)}
+                    </p>
                     <p className="mt-1 break-all text-xs text-slate-500">{item.domains.join(", ")}</p>
                   </div>
                   <div className="flex w-full flex-col gap-1 sm:w-28">

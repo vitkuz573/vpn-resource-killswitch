@@ -80,9 +80,10 @@ Key variables:
 - `VRKS_PROJECT_ROOT`
 - `VRKS_CLI_PATH`
 - `VRKS_PYTHON_BIN`
-- `VRKS_REQUIRE_SUDO`
+- `VRKS_SUDO_MODE` (`auto` | `always` | `never`, default `auto`)
 
-If VRKS CLI requires root, set `VRKS_REQUIRE_SUDO=true` and configure sudo policy for non-interactive command execution.
+`auto` mode tries command normally and automatically retries with `sudo -n` if VRKS reports root is required.
+For write operations (`apply`, `preset-apply`, resource edits), configure sudo policy for non-interactive execution.
 
 ## Run
 
