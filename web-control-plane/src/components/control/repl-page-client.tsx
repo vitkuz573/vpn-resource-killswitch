@@ -390,7 +390,7 @@ export function ReplPageClient({ userRole }: Props) {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-2xl">REPL</CardTitle>
-            <CardDescription>Full PTY sessions powered by xterm + node-pty with live stream.</CardDescription>
+            <CardDescription>Interactive terminal sessions with live stream and session control.</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={() => void refreshSessions()} disabled={loading}>

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "VRKS Control Plane",
-  description: "Next.js control plane for VPN Resource Kill-Switch",
+  description: "Control plane for VPN Resource Kill-Switch",
 };
 
 export default function RootLayout({

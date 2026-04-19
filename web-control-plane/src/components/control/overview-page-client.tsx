@@ -88,34 +88,26 @@ export function OverviewPageClient({ userRole }: Props) {
       ]
     : [];
 
-  const unitCards = [
+  const unitActions = [
     {
       key: "timer" as RuntimeUnit,
       label: "Timer",
       description: "Periodic refresh unit.",
-      enabled: statusValue("timer_enabled"),
-      active: statusValue("timer_active"),
     },
     {
       key: "watch" as RuntimeUnit,
       label: "Watch",
       description: "Realtime link/route monitor.",
-      enabled: statusValue("watch_enabled"),
-      active: statusValue("watch_active"),
     },
     {
       key: "blockpage" as RuntimeUnit,
       label: "Blockpage HTTP",
       description: "HTTP block page service.",
-      enabled: statusValue("blockpage_enabled"),
-      active: statusValue("blockpage_active"),
     },
     {
       key: "blockpage-tls" as RuntimeUnit,
       label: "Blockpage TLS",
       description: "HTTPS block page service.",
-      enabled: statusValue("tls_blockpage_enabled"),
-      active: statusValue("tls_blockpage_active"),
     },
   ];
 
@@ -211,236 +203,228 @@ export function OverviewPageClient({ userRole }: Props) {
         </CardHeader>
       </Card>
 
-      <Card className="col-span-12 md:col-span-6">
+      <Card className="col-span-12">
         <CardHeader>
-          <CardTitle>Runtime status</CardTitle>
-          <CardDescription>Current runtime and firewall state.</CardDescription>
+          <CardTitle>Runtime status & management</CardTitle>
+          <CardDescription>Monitor current state and control runtime units in one place.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {statusRows.map(([label, value]) => (
-            <div key={label} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
-              <p className="text-sm text-muted-foreground">{label}</p>
-              <Badge variant="outline" className="font-mono text-xs">{value}</Badge>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card className="col-span-12 md:col-span-6">
-        <CardHeader>
-          <CardTitle>Runtime management</CardTitle>
-          <CardDescription>Manage runtime units without leaving the control plane.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Global</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={() =>
-                  void runRuntimeOperation(
-                    { operation: "manage_unit", unit: "all", action: "enable-now" },
-                    "Runtime stack enabled",
-                  )
-                }
-                disabled={loading || !isOperator}
-              >
-                Enable all
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  void runRuntimeOperation(
-                    { operation: "manage_unit", unit: "all", action: "restart" },
-                    "Runtime stack restarted",
-                  )
-                }
-                disabled={loading || !isOperator}
-              >
-                Restart all
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  void runRuntimeOperation(
-                    { operation: "manage_unit", unit: "all", action: "disable-now" },
-                    "Runtime stack disabled",
-                  )
-                }
-                disabled={loading || !isOperator}
-              >
-                Disable all
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={() =>
-                  void runRuntimeOperation(
-                    { operation: "disable_rules" },
-                    "Rules disabled (nft table removed)",
-                  )
-                }
-                disabled={loading || !isOperator}
-              >
-                Disable rules
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {unitCards.map((unit) => (
-              <div key={unit.key} className="rounded-lg border bg-muted/20 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-semibold">{unit.label}</h3>
-                    <p className="text-xs text-muted-foreground">{unit.description}</p>
-                  </div>
-                  <div className="space-y-1 text-right text-xs">
-                    <p>
-                      <span className="font-semibold">enabled:</span> {unit.enabled}
-                    </p>
-                    <p>
-                      <span className="font-semibold">active:</span> {unit.active}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() =>
-                      void runRuntimeOperation(
-                        { operation: "manage_unit", unit: unit.key, action: "start" },
-                        `${unit.label}: started`,
-                      )
-                    }
-                    disabled={loading || !isOperator}
-                  >
-                    Start
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() =>
-                      void runRuntimeOperation(
-                        { operation: "manage_unit", unit: unit.key, action: "stop" },
-                        `${unit.label}: stopped`,
-                      )
-                    }
-                    disabled={loading || !isOperator}
-                  >
-                    Stop
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() =>
-                      void runRuntimeOperation(
-                        { operation: "manage_unit", unit: unit.key, action: "restart" },
-                        `${unit.label}: restarted`,
-                      )
-                    }
-                    disabled={loading || !isOperator}
-                  >
-                    Restart
-                  </Button>
-                  <Button
-                    type="button"
-                    size="xs"
-                    onClick={() =>
-                      void runRuntimeOperation(
-                        {
-                          operation: "manage_unit",
-                          unit: unit.key,
-                          action: "enable-now",
-                        },
-                        `${unit.label}: enabled`,
-                      )
-                    }
-                    disabled={loading || !isOperator}
-                  >
-                    Enable
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="xs"
-                    onClick={() =>
-                      void runRuntimeOperation(
-                        {
-                          operation: "manage_unit",
-                          unit: unit.key,
-                          action: "disable-now",
-                        },
-                        `${unit.label}: disabled`,
-                      )
-                    }
-                    disabled={loading || !isOperator}
-                  >
-                    Disable
-                  </Button>
-                </div>
+        <CardContent className="grid gap-4 xl:grid-cols-12">
+          <section className="space-y-2 xl:col-span-4">
+            {statusRows.map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <Badge variant="outline" className="font-mono text-xs">{value}</Badge>
               </div>
             ))}
-          </div>
+          </section>
 
-          <Separator />
-
-          <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</p>
-            <p className="text-xs text-muted-foreground">
-              Teardown removes VRKS runtime units and stops protection.
-            </p>
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <label className="flex items-center gap-2">
-                <Checkbox
-                  checked={teardownPurge}
-                  onCheckedChange={(value) => setTeardownPurge(Boolean(value))}
-                  id="teardown-purge"
-                />
-                <span>purge config/state</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <Checkbox
-                  checked={teardownRemoveBin}
-                  onCheckedChange={(value) => setTeardownRemoveBin(Boolean(value))}
-                  id="teardown-remove-bin"
-                />
-                <span>remove runtime binary</span>
-              </label>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  if (!window.confirm("Run VRKS teardown? This will stop runtime protection.")) {
-                    return;
+          <section className="space-y-3 xl:col-span-8">
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Global</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() =>
+                    void runRuntimeOperation(
+                      { operation: "manage_unit", unit: "all", action: "enable-now" },
+                      "Runtime stack enabled",
+                    )
                   }
-                  void runRuntimeOperation(
-                    {
-                      operation: "teardown",
-                      purge: teardownPurge,
-                      removeBin: teardownRemoveBin,
-                    },
-                    "Runtime teardown completed",
-                  );
-                }}
-                disabled={loading || !isOperator}
-              >
-                Run teardown
-              </Button>
+                  disabled={loading || !isOperator}
+                >
+                  Enable all
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    void runRuntimeOperation(
+                      { operation: "manage_unit", unit: "all", action: "restart" },
+                      "Runtime stack restarted",
+                    )
+                  }
+                  disabled={loading || !isOperator}
+                >
+                  Restart all
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    void runRuntimeOperation(
+                      { operation: "manage_unit", unit: "all", action: "disable-now" },
+                      "Runtime stack disabled",
+                    )
+                  }
+                  disabled={loading || !isOperator}
+                >
+                  Disable all
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() =>
+                    void runRuntimeOperation(
+                      { operation: "disable_rules" },
+                      "Rules disabled (nft table removed)",
+                    )
+                  }
+                  disabled={loading || !isOperator}
+                >
+                  Disable rules
+                </Button>
+              </div>
             </div>
-          </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per unit actions</p>
+              <div className="space-y-2">
+                {unitActions.map((unit) => (
+                  <div
+                    key={unit.key}
+                    className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3 lg:flex-row lg:items-center lg:justify-between"
+                  >
+                    <div>
+                      <h3 className="text-sm font-semibold">{unit.label}</h3>
+                      <p className="text-xs text-muted-foreground">{unit.description}</p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() =>
+                          void runRuntimeOperation(
+                            { operation: "manage_unit", unit: unit.key, action: "start" },
+                            `${unit.label}: started`,
+                          )
+                        }
+                        disabled={loading || !isOperator}
+                      >
+                        Start
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() =>
+                          void runRuntimeOperation(
+                            { operation: "manage_unit", unit: unit.key, action: "stop" },
+                            `${unit.label}: stopped`,
+                          )
+                        }
+                        disabled={loading || !isOperator}
+                      >
+                        Stop
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() =>
+                          void runRuntimeOperation(
+                            { operation: "manage_unit", unit: unit.key, action: "restart" },
+                            `${unit.label}: restarted`,
+                          )
+                        }
+                        disabled={loading || !isOperator}
+                      >
+                        Restart
+                      </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        onClick={() =>
+                          void runRuntimeOperation(
+                            {
+                              operation: "manage_unit",
+                              unit: unit.key,
+                              action: "enable-now",
+                            },
+                            `${unit.label}: enabled`,
+                          )
+                        }
+                        disabled={loading || !isOperator}
+                      >
+                        Enable
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        onClick={() =>
+                          void runRuntimeOperation(
+                            {
+                              operation: "manage_unit",
+                              unit: unit.key,
+                              action: "disable-now",
+                            },
+                            `${unit.label}: disabled`,
+                          )
+                        }
+                        disabled={loading || !isOperator}
+                      >
+                        Disable
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</p>
+              <p className="text-xs text-muted-foreground">
+                Teardown removes VRKS runtime units and stops protection.
+              </p>
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <label className="flex items-center gap-2">
+                  <Checkbox
+                    checked={teardownPurge}
+                    onCheckedChange={(value) => setTeardownPurge(Boolean(value))}
+                    id="teardown-purge"
+                  />
+                  <span>purge config/state</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <Checkbox
+                    checked={teardownRemoveBin}
+                    onCheckedChange={(value) => setTeardownRemoveBin(Boolean(value))}
+                    id="teardown-remove-bin"
+                  />
+                  <span>remove runtime binary</span>
+                </label>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    if (!window.confirm("Run VRKS teardown? This will stop runtime protection.")) {
+                      return;
+                    }
+                    void runRuntimeOperation(
+                      {
+                        operation: "teardown",
+                        purge: teardownPurge,
+                        removeBin: teardownRemoveBin,
+                      },
+                      "Runtime teardown completed",
+                    );
+                  }}
+                  disabled={loading || !isOperator}
+                >
+                  Run teardown
+                </Button>
+              </div>
+            </div>
+          </section>
         </CardContent>
       </Card>
 

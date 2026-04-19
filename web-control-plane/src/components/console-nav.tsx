@@ -18,6 +18,7 @@ type NavItem = {
 
 const ITEMS: NavItem[] = [
   { href: "/overview", label: "Overview" },
+  { href: "/account", label: "Account" },
   { href: "/profiles", label: "Profiles" },
   { href: "/presets", label: "Presets" },
   { href: "/imports", label: "Imports" },

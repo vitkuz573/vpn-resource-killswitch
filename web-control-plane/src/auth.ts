@@ -70,9 +70,36 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     jwt: async ({ token, user }) => {
+      const now = Date.now();
       if (user) {
         token.role = user.role;
         token.sub = user.id;
+        token.name = user.name;
+        token.email = user.email;
+        token.profileSyncAt = now;
+        return token;
+      }
+
+      const userId = typeof token.sub === "string" ? token.sub : "";
+      const lastSync = typeof token.profileSyncAt === "number" ? token.profileSyncAt : 0;
+      if (!userId || now - lastSync < 60_000) {
+        return token;
+      }
+
+      const dbUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          name: true,
+          email: true,
+          role: true,
+          isActive: true,
+        },
+      });
+      token.profileSyncAt = now;
+      if (dbUser?.isActive) {
+        token.role = dbUser.role;
+        token.name = dbUser.name;
+        token.email = dbUser.email;
       }
       return token;
     },
@@ -80,6 +107,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.sub ?? "";
         session.user.role = typeof token.role === "string" ? token.role : "VIEWER";
+        if (typeof token.name === "string") {
+          session.user.name = token.name;
+        }
+        if (typeof token.email === "string") {
+          session.user.email = token.email;
+        }
       }
       return session;
     },

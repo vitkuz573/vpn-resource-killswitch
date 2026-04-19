@@ -48,6 +48,9 @@ Auth/admin endpoints:
 - `GET /api/auth/bootstrap`
 - `POST /api/auth/register`
 - `GET /api/auth/users` (ADMIN)
+- `GET /api/auth/account`
+- `PATCH /api/auth/account`
+- `POST /api/auth/account/password`
 
 ### Profile management features
 
@@ -61,6 +64,7 @@ Auth/admin endpoints:
 ## UI routes
 
 - `/overview` — runtime health + apply/verify operations
+- `/account` — profile and password settings
 - `/profiles` — resource profile inventory, filtering, edit/remove
 - `/presets` — preset catalog and apply workflow
 - `/imports` — import/export/validate JSON payloads
