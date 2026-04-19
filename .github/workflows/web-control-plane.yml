@@ -1,0 +1,109 @@
+name: Web Control Plane CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run VRKS unit tests
+        run: python -m unittest discover -s tests -v
+
+  web-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-control-plane
+    env:
+      DATABASE_URL: file:./dev.db
+      AUTH_SECRET: ci-auth-secret-change-me
+      AUTH_TRUST_HOST: "true"
+      VRKS_PROJECT_ROOT: ${{ github.workspace }}
+      VRKS_CLI_PATH: ${{ github.workspace }}/vrks.py
+      VRKS_PYTHON_BIN: python3
+      VRKS_SUDO_MODE: never
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web-control-plane/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare database
+        run: |
+          rm -f dev.db
+          npm run prisma:generate
+          npm run prisma:push
+
+      - name: Generate OpenAPI types
+        run: npm run openapi:types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    needs: web-quality
+    defaults:
+      run:
+        working-directory: web-control-plane
+    env:
+      DATABASE_URL: file:./dev.db
+      AUTH_SECRET: ci-auth-secret-change-me
+      AUTH_TRUST_HOST: "true"
+      VRKS_PROJECT_ROOT: ${{ github.workspace }}
+      VRKS_CLI_PATH: ${{ github.workspace }}/vrks.py
+      VRKS_PYTHON_BIN: python3
+      VRKS_SUDO_MODE: never
+      E2E_ADMIN_EMAIL: e2e-admin@vrks.local
+      E2E_ADMIN_PASSWORD: E2E_Admin#12345
+      E2E_ADMIN_NAME: E2E Admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web-control-plane/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare database
+        run: |
+          rm -f dev.db
+          npm run prisma:generate
+          npm run prisma:push
+
+      - name: Generate OpenAPI types
+        run: npm run openapi:types
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright smoke tests
+        run: npm run test:e2e

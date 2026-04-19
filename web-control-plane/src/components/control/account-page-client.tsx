@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatDate, parseResponse } from "@/lib/control-plane-client";
+import {
+  apiGetAccount,
+  apiGetAccountSessions,
+  apiPatchAccount,
+  apiPostAccountPassword,
+  apiPostAccountSessions,
+} from "@/lib/api/client";
+import { formatDate } from "@/lib/control-plane-client";
 
 type Props = {
   userRole: string;
@@ -25,12 +32,34 @@ type AccountProfile = {
   updatedAt: string;
 };
 
+type ActiveSession = {
+  sessionId: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+};
+
+type LoginEvent = {
+  id: string;
+  method: string;
+  success: boolean;
+  userAgent: string | null;
+  ipAddress: string | null;
+  sessionId: string | null;
+  createdAt: string;
+};
+
 export function AccountPageClient({ userRole }: Props) {
   const [loading, setLoading] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [sessionsBusy, setSessionsBusy] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
   const [profile, setProfile] = useState<AccountProfile | null>(null);
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
+  const [recentLogins, setRecentLogins] = useState<LoginEvent[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [output, setOutput] = useState("(idle)");
 
   const [nameInput, setNameInput] = useState("");
@@ -41,7 +70,7 @@ export function AccountPageClient({ userRole }: Props) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const busy = loading || passwordBusy || signingOut;
+  const busy = loading || passwordBusy || sessionsBusy || signingOut;
 
   const emailChanged = useMemo(() => {
     if (!profile) {
@@ -51,15 +80,26 @@ export function AccountPageClient({ userRole }: Props) {
   }, [profile, emailInput]);
 
   async function refreshProfile(): Promise<void> {
+    const data = await apiGetAccount();
+    setProfile(data.profile);
+    setNameInput(data.profile.name);
+    setEmailInput(data.profile.email);
+  }
+
+  async function refreshSessionSecurity(): Promise<void> {
+    const data = await apiGetAccountSessions();
+    setCurrentSessionId(data.currentSessionId);
+    setActiveSessions(data.activeSessions || []);
+    setRecentLogins(data.recentLogins || []);
+  }
+
+  async function refreshAll(): Promise<void> {
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/account", { cache: "no-store" });
-      const data = await parseResponse<{ profile: AccountProfile }>(response);
-      setProfile(data.profile);
-      setNameInput(data.profile.name);
-      setEmailInput(data.profile.email);
+      await Promise.all([refreshProfile(), refreshSessionSecurity()]);
+      setOutput("Account state refreshed.");
     } catch (error) {
-      setOutput(error instanceof Error ? error.message : "Failed to load account profile");
+      setOutput(error instanceof Error ? error.message : "Failed to refresh account state");
     } finally {
       setLoading(false);
     }
@@ -67,9 +107,10 @@ export function AccountPageClient({ userRole }: Props) {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void refreshProfile();
+      void refreshAll();
     }, 0);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function saveProfile(event: React.FormEvent): Promise<void> {
@@ -92,31 +133,26 @@ export function AccountPageClient({ userRole }: Props) {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/account", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await apiPatchAccount({
           name: normalizedName,
           email: normalizedEmail,
           currentPassword: profileCurrentPassword || undefined,
-        }),
       });
-      const data = await parseResponse<{
-        ok: boolean;
-        profile: AccountProfile;
-        requiresReauth: boolean;
-      }>(response);
 
       setProfile(data.profile);
       setNameInput(data.profile.name);
       setEmailInput(data.profile.email);
       setProfileCurrentPassword("");
+      await refreshSessionSecurity();
 
       if (data.requiresReauth) {
-        setOutput("Profile updated. Email changed, please sign out and sign in again.");
-      } else {
-        setOutput("Profile updated.");
+        setOutput("Profile updated. Session re-authentication required.");
+        setSigningOut(true);
+        await signOut({ callbackUrl: "/login" });
+        return;
       }
+
+      setOutput("Profile updated.");
     } catch (error) {
       setOutput(error instanceof Error ? error.message : "Profile update failed");
     } finally {
@@ -128,25 +164,62 @@ export function AccountPageClient({ userRole }: Props) {
     event.preventDefault();
     setPasswordBusy(true);
     try {
-      const response = await fetch("/api/auth/account/password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-          confirmPassword,
-        }),
+      const data = await apiPostAccountPassword({
+        currentPassword,
+        newPassword,
+        confirmPassword,
       });
-      const data = await parseResponse<{ ok: boolean; requiresReauth: boolean; message: string }>(response);
 
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setOutput(`${data.message} Sign out and sign in again to refresh all sessions.`);
+
+      if (data.requiresReauth) {
+        setOutput(`${data.message} Re-authentication required.`);
+        setSigningOut(true);
+        await signOut({ callbackUrl: "/login" });
+        return;
+      }
+
+      setOutput(data.message);
     } catch (error) {
       setOutput(error instanceof Error ? error.message : "Password update failed");
     } finally {
       setPasswordBusy(false);
+    }
+  }
+
+  async function updateSessions(action: "revoke" | "revoke_others" | "revoke_all", sessionId?: string): Promise<void> {
+    if (action === "revoke" && !sessionId) {
+      setOutput("Session id is required for single-session revoke.");
+      return;
+    }
+
+    setSessionsBusy(true);
+    try {
+      const data =
+        action === "revoke"
+          ? await apiPostAccountSessions({
+              action: "revoke",
+              sessionId: sessionId as string,
+            })
+          : await apiPostAccountSessions({
+              action,
+            });
+
+      if (data.requiresReauth) {
+        setOutput(`Session action '${data.action}' revoked ${data.revokedCount} sessions. Re-authentication required.`);
+        setSigningOut(true);
+        await signOut({ callbackUrl: "/login" });
+        return;
+      }
+
+      await refreshSessionSecurity();
+      setOutput(`Session action '${data.action}' revoked ${data.revokedCount} sessions.`);
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : "Session update failed");
+    } finally {
+      setSessionsBusy(false);
     }
   }
 
@@ -161,10 +234,10 @@ export function AccountPageClient({ userRole }: Props) {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-2xl">Account settings</CardTitle>
-            <CardDescription>Manage profile identity and authentication security.</CardDescription>
+            <CardDescription>Manage profile identity, password, and active sessions.</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => void refreshProfile()} disabled={busy}>
+            <Button type="button" variant="outline" onClick={() => void refreshAll()} disabled={busy}>
               Refresh
             </Button>
             <Button type="button" variant="destructive" onClick={() => void runSignOut()} disabled={busy}>
@@ -306,7 +379,106 @@ export function AccountPageClient({ userRole }: Props) {
         </CardContent>
       </Card>
 
-      <Card className="col-span-12 md:col-span-5">
+      <Card className="col-span-12">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle>Active sessions</CardTitle>
+            <CardDescription>Review and revoke active authenticated sessions.</CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void updateSessions("revoke_others")}
+              disabled={busy}
+            >
+              Revoke others
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => void updateSessions("revoke_all")}
+              disabled={busy}
+            >
+              Revoke all
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {activeSessions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No active sessions found.</p>
+            ) : (
+              activeSessions.map((session) => {
+                const isCurrent = currentSessionId === session.sessionId;
+                return (
+                  <div
+                    key={session.sessionId}
+                    className="flex flex-col gap-2 rounded-lg border bg-muted/20 px-3 py-2 lg:flex-row lg:items-center lg:justify-between"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{session.sessionId.slice(0, 12)}...</span>
+                        {isCurrent ? <Badge variant="secondary">current</Badge> : null}
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {session.userAgent || "Unknown user-agent"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        IP {session.ipAddress || "-"} · seen {formatDate(session.lastSeenAt)} · created {formatDate(session.createdAt)}
+                      </p>
+                    </div>
+                    <div>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void updateSessions("revoke", session.sessionId)}
+                        disabled={busy}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="col-span-12">
+        <CardHeader>
+          <CardTitle>Login history</CardTitle>
+          <CardDescription>Recent successful login events for this account.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {recentLogins.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No login events found.</p>
+            ) : (
+              recentLogins.map((event) => (
+                <div
+                  key={event.id}
+                  className="flex flex-col gap-1 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge variant={event.success ? "default" : "outline"}>{event.success ? "success" : "failed"}</Badge>
+                    <span className="font-medium text-foreground">{event.method}</span>
+                    <span>{formatDate(event.createdAt)}</span>
+                  </div>
+                  <p className="truncate">{event.userAgent || "Unknown user-agent"}</p>
+                  <p>IP {event.ipAddress || "-"} · session {event.sessionId ? `${event.sessionId.slice(0, 12)}...` : "-"}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="col-span-12">
         <CardHeader>
           <CardTitle>Output</CardTitle>
         </CardHeader>

@@ -58,9 +58,25 @@ export async function POST(request: Request) {
   }
 
   const newPasswordHash = await hashPassword(input.newPassword);
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { passwordHash: newPasswordHash },
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: newPasswordHash,
+        sessionVersion: { increment: 1 },
+      },
+    });
+
+    await tx.authSession.updateMany({
+      where: {
+        userId: user.id,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+        revokedReason: "password_changed",
+      },
+    });
   });
 
   await writeAudit({

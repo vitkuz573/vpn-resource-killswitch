@@ -1,0 +1,338 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "VRKS Control Plane API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3000"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": ["error"]
+      },
+      "AccountProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "role": { "type": "string", "enum": ["ADMIN", "OPERATOR", "VIEWER"] },
+          "isActive": { "type": "boolean" },
+          "lastLoginAt": { "type": ["string", "null"], "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "name", "email", "role", "isActive", "lastLoginAt", "createdAt", "updatedAt"]
+      },
+      "ActiveSession": {
+        "type": "object",
+        "properties": {
+          "sessionId": { "type": "string" },
+          "userAgent": { "type": ["string", "null"] },
+          "ipAddress": { "type": ["string", "null"] },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "lastSeenAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["sessionId", "userAgent", "ipAddress", "createdAt", "lastSeenAt"]
+      },
+      "LoginEvent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "method": { "type": "string" },
+          "success": { "type": "boolean" },
+          "userAgent": { "type": ["string", "null"] },
+          "ipAddress": { "type": ["string", "null"] },
+          "sessionId": { "type": ["string", "null"] },
+          "createdAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "method", "success", "userAgent", "ipAddress", "sessionId", "createdAt"]
+      },
+      "AuditItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "actorId": { "type": ["string", "null"] },
+          "actorEmail": { "type": ["string", "null"] },
+          "action": { "type": "string" },
+          "target": { "type": ["string", "null"] },
+          "payload": { "type": ["string", "null"] },
+          "payloadParsed": {},
+          "createdAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "actorId", "actorEmail", "action", "target", "payload", "payloadParsed", "createdAt"]
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/account": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Current account profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "profile": { "$ref": "#/components/schemas/AccountProfile" }
+                  },
+                  "required": ["profile"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "email": { "type": "string", "format": "email" },
+                  "currentPassword": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "profile": { "$ref": "#/components/schemas/AccountProfile" },
+                    "requiresReauth": { "type": "boolean" }
+                  },
+                  "required": ["ok", "profile", "requiresReauth"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/account/password": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "currentPassword": { "type": "string" },
+                  "newPassword": { "type": "string" },
+                  "confirmPassword": { "type": "string" }
+                },
+                "required": ["currentPassword", "newPassword", "confirmPassword"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password update result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "requiresReauth": { "type": "boolean" },
+                    "message": { "type": "string" }
+                  },
+                  "required": ["ok", "requiresReauth", "message"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/account/sessions": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Session and login security state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "currentSessionId": { "type": ["string", "null"] },
+                    "activeSessions": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ActiveSession" }
+                    },
+                    "recentLogins": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/LoginEvent" }
+                    }
+                  },
+                  "required": ["currentSessionId", "activeSessions", "recentLogins"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": { "type": "string", "enum": ["revoke_others"] }
+                    },
+                    "required": ["action"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": { "type": "string", "enum": ["revoke_all"] }
+                    },
+                    "required": ["action"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": { "type": "string", "enum": ["revoke"] },
+                      "sessionId": { "type": "string" }
+                    },
+                    "required": ["action", "sessionId"]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session revoke result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "action": { "type": "string" },
+                    "revokedCount": { "type": "number" },
+                    "requiresReauth": { "type": "boolean" }
+                  },
+                  "required": ["ok", "action", "revokedCount", "requiresReauth"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/audit/logs": {
+      "get": {
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "actor", "in": "query", "schema": { "type": "string" } },
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "target", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "page", "in": "query", "schema": { "type": "number" } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "number" } },
+          { "name": "export", "in": "query", "schema": { "type": "string", "enum": ["1", "true"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit logs list or export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/AuditItem" }
+                        },
+                        "meta": {
+                          "type": "object",
+                          "properties": {
+                            "page": { "type": "number" },
+                            "pageSize": { "type": "number" },
+                            "total": { "type": "number" },
+                            "totalPages": { "type": "number" }
+                          },
+                          "required": ["page", "pageSize", "total", "totalPages"]
+                        }
+                      },
+                      "required": ["items", "meta"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "exportedAt": { "type": "string", "format": "date-time" },
+                        "count": { "type": "number" },
+                        "items": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/AuditItem" }
+                        }
+                      },
+                      "required": ["exportedAt", "count", "items"]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

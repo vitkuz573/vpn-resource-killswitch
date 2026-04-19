@@ -30,7 +30,7 @@ export default auth((req: AuthenticatedRequest) => {
     return NextResponse.next();
   }
 
-  if (!req.auth) {
+  if (!req.auth?.user?.id) {
     const loginUrl = new URL("/login", nextUrl.origin);
     loginUrl.searchParams.set("next", `${pathname}${nextUrl.search}`);
     return NextResponse.redirect(loginUrl);

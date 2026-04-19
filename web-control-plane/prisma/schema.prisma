@@ -20,11 +20,14 @@ model User {
   passwordHash String
   role         UserRole  @default(VIEWER)
   isActive     Boolean   @default(true)
+  sessionVersion Int     @default(0)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   createdLogs  AuditLog[] @relation("AuditActor")
+  sessions     AuthSession[]
+  loginEvents  AuthLoginEvent[]
 }
 
 model AuditLog {
@@ -41,4 +44,36 @@ model AuditLog {
   @@index([createdAt])
   @@index([action])
   @@index([actorId])
+}
+
+model AuthSession {
+  id           String    @id @default(cuid())
+  sessionId    String    @unique
+  userId       String
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  revokedAt    DateTime?
+  revokedReason String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lastSeenAt])
+  @@index([userId, revokedAt])
+}
+
+model AuthLoginEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  method    String
+  success   Boolean  @default(true)
+  userAgent String?
+  ipAddress String?
+  sessionId String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

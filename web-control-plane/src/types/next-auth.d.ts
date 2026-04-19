@@ -8,17 +8,24 @@ declare module "next-auth" {
       name?: string | null;
       email?: string | null;
       role: string;
+      sessionId?: string;
     };
   }
 
   interface User {
     role?: string;
+    sessionVersion?: number;
+    loginUserAgent?: string | null;
+    loginIpAddress?: string | null;
   }
 }
 
 declare module "next-auth/jwt" {
   interface JWT {
     role?: string;
+    sid?: string;
+    sessionVersion?: number;
     profileSyncAt?: number;
+    sessionSyncAt?: number;
   }
 }

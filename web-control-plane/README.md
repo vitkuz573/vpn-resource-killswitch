@@ -51,6 +51,10 @@ Auth/admin endpoints:
 - `GET /api/auth/account`
 - `PATCH /api/auth/account`
 - `POST /api/auth/account/password`
+- `GET /api/auth/account/sessions`
+- `POST /api/auth/account/sessions`
+- `GET /api/audit/logs` (ADMIN)
+- `GET /api/openapi`
 
 ### Profile management features
 
@@ -65,6 +69,7 @@ Auth/admin endpoints:
 
 - `/overview` — runtime health + apply/verify operations
 - `/account` — profile and password settings
+- `/audit` — audit center with filters/export (ADMIN)
 - `/profiles` — resource profile inventory, filtering, edit/remove
 - `/presets` — preset catalog and apply workflow
 - `/imports` — import/export/validate JSON payloads
@@ -116,6 +121,7 @@ Then open `http://127.0.0.1:3000/login`.
 ## Quality checks
 
 ```bash
+npm run openapi:types
 npm run lint
 npm run build
 ```

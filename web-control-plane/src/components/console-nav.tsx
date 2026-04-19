@@ -22,6 +22,7 @@ const ITEMS: NavItem[] = [
   { href: "/profiles", label: "Profiles" },
   { href: "/presets", label: "Presets" },
   { href: "/imports", label: "Imports" },
+  { href: "/audit", label: "Audit", minRole: "ADMIN" },
   { href: "/repl", label: "REPL", minRole: "OPERATOR" },
   { href: "/users", label: "Users", minRole: "ADMIN" },
 ];

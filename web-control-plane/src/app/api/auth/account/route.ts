@@ -113,19 +113,42 @@ export async function PATCH(request: Request) {
     return jsonError("No profile changes detected.", 400);
   }
 
-  const updated = await prisma.user.update({
-    where: { id: user.id },
-    data: updates,
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      isActive: true,
-      lastLoginAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  const requiresReauth = changedFields.includes("email");
+  const updated = await prisma.$transaction(async (tx) => {
+    const nextUser = await tx.user.update({
+      where: { id: user.id },
+      data: requiresReauth
+        ? {
+            ...updates,
+            sessionVersion: { increment: 1 },
+          }
+        : updates,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (requiresReauth) {
+      await tx.authSession.updateMany({
+        where: {
+          userId: user.id,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+          revokedReason: "email_changed",
+        },
+      });
+    }
+
+    return nextUser;
   });
 
   await writeAudit({
@@ -139,6 +162,6 @@ export async function PATCH(request: Request) {
   return NextResponse.json({
     ok: true,
     profile: updated,
-    requiresReauth: changedFields.includes("email"),
+    requiresReauth,
   });
 }
