@@ -6,7 +6,7 @@ import shutil
 import time
 import sys
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,8 @@ from .network import (
     validate_ifname,
 )
 from .notifications import publish_event
-from .presets import get_preset, list_presets
+from .openai_country_sync import fetch_openai_supported_country_snapshot
+from .presets import get_preset, get_user_preset_raw, list_presets, upsert_user_preset
 from .runtime import (
     disable_timer,
     enable_timer,
@@ -292,6 +293,19 @@ def _merge_events(previous_events: Any, new_events: list[dict[str, Any]]) -> lis
     return merged
 
 
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 class KillSwitchService:
     def __init__(self, project_root: Path | None = None) -> None:
         self.project_root = project_root or Path(__file__).resolve().parents[1]
@@ -454,6 +468,152 @@ class KillSwitchService:
             },
             "applied": run_apply,
             "apply_report": apply_report,
+        }
+
+    def sync_openai_supported_countries(
+        self,
+        *,
+        preset_name: str,
+        force: bool,
+        min_interval_hours: int,
+        apply_resource: bool,
+        run_apply: bool,
+        timeout: int = 20,
+    ) -> dict[str, Any]:
+        ensure_root()
+        if min_interval_hours < 0:
+            raise CLIError("min_interval_hours must be >= 0.")
+        if timeout < 1:
+            raise CLIError("timeout must be >= 1.")
+
+        target_name = normalize_resource_name(preset_name)
+        if target_name != "chatgpt":
+            raise CLIError(
+                "OpenAI country sync is currently supported only for preset 'chatgpt'."
+            )
+        preset = get_preset(target_name)
+
+        user_raw = get_user_preset_raw(target_name) or {}
+        user_meta = user_raw.get("meta") if isinstance(user_raw, dict) else None
+        meta = dict(user_meta) if isinstance(user_meta, dict) else {}
+        sync_meta_raw = meta.get("openai_country_sync")
+        sync_meta = dict(sync_meta_raw) if isinstance(sync_meta_raw, dict) else {}
+
+        now = datetime.now(UTC)
+        last_synced_at = str(sync_meta.get("last_synced_at") or "").strip() or None
+        last_synced_dt = _parse_iso_datetime(last_synced_at)
+        if (
+            not force
+            and min_interval_hours > 0
+            and last_synced_dt is not None
+            and (now - last_synced_dt) < timedelta(hours=min_interval_hours)
+        ):
+            next_sync_at = last_synced_dt + timedelta(hours=min_interval_hours)
+            return {
+                "preset": target_name,
+                "skipped": True,
+                "skip_reason": "interval_not_elapsed",
+                "last_synced_at": last_synced_dt.isoformat(),
+                "next_sync_at": next_sync_at.isoformat(),
+                "interval_hours": min_interval_hours,
+                "applied": False,
+                "apply_report": None,
+            }
+
+        old_allowed = normalize_country_codes(preset.policy.get("allowed_countries"))
+        snapshot = fetch_openai_supported_country_snapshot(timeout=timeout)
+        new_allowed = normalize_country_codes(snapshot.country_codes)
+        added = sorted(set(new_allowed) - set(old_allowed))
+        removed = sorted(set(old_allowed) - set(new_allowed))
+        preset_changed = old_allowed != new_allowed
+
+        policy = {
+            "required_country": preset.policy.get("required_country"),
+            "required_server": preset.policy.get("required_server"),
+            "allowed_countries": new_allowed,
+            "blocked_countries": normalize_country_codes(preset.policy.get("blocked_countries")),
+            "blocked_context_keywords": normalize_keywords(
+                preset.policy.get("blocked_context_keywords")
+            ),
+        }
+        sync_meta = {
+            "source_url": snapshot.source_url,
+            "fetched_at": snapshot.fetched_at,
+            "last_synced_at": now.isoformat(),
+            "html_sha256": snapshot.html_sha256,
+            "country_names_count": len(snapshot.country_names),
+            "country_codes_count": len(new_allowed),
+        }
+        meta["openai_country_sync"] = sync_meta
+        upsert_user_preset(
+            {
+                "name": preset.name,
+                "description": preset.description,
+                "domains": preset.domains,
+                "policy": policy,
+                "meta": meta,
+            }
+        )
+
+        resource_found = False
+        resource_updated = False
+        if apply_resource:
+            try:
+                config = storage.load_config()
+            except CLIError:
+                config = None
+            if config is not None:
+                try:
+                    resource = _resource_by_name(config, target_name)
+                except CLIError:
+                    resource = None
+                if resource is not None:
+                    resource_found = True
+                    resource_allowed = normalize_country_codes(resource.policy.allowed_countries)
+                    if resource_allowed != new_allowed:
+                        resource.policy.allowed_countries = list(new_allowed)
+                        storage.save_config(config)
+                        resource_updated = True
+
+        apply_report = self.apply(auto_sync_openai_countries=False) if run_apply else None
+
+        if preset_changed or resource_updated:
+            publish_event(
+                _new_event(
+                    kind="preset_openai_countries_synced",
+                    severity="normal",
+                    resource=target_name,
+                    title=f"VRKS: {target_name} countries synced",
+                    message=(
+                        f"{target_name} allow-country list synced from OpenAI source "
+                        f"(added={len(added)}, removed={len(removed)})."
+                    ),
+                    details={
+                        "source_url": snapshot.source_url,
+                        "added": added,
+                        "removed": removed,
+                        "country_codes_count": len(new_allowed),
+                    },
+                )
+            )
+
+        return {
+            "preset": target_name,
+            "skipped": False,
+            "source_url": snapshot.source_url,
+            "fetched_at": snapshot.fetched_at,
+            "html_sha256": snapshot.html_sha256,
+            "country_names_count": len(snapshot.country_names),
+            "old_allowed_count": len(old_allowed),
+            "new_allowed_count": len(new_allowed),
+            "preset_changed": preset_changed,
+            "added_countries": added,
+            "removed_countries": removed,
+            "resource_found": resource_found,
+            "resource_updated": resource_updated,
+            "applied": run_apply,
+            "apply_report": apply_report,
+            "sync_meta": sync_meta,
         }
 
     def discover_resource_domains(
@@ -755,7 +915,13 @@ class KillSwitchService:
             "passed": overall_passed,
         }
 
-    def apply(self, config: AppConfig | None = None) -> dict[str, Any]:
+    def apply(
+        self,
+        config: AppConfig | None = None,
+        *,
+        auto_sync_openai_countries: bool = True,
+        sync_min_interval_hours: int = 24,
+    ) -> dict[str, Any]:
         ensure_root()
         current = config or storage.load_config()
         current.vpn_interface = validate_ifname(current.vpn_interface)
@@ -776,6 +942,22 @@ class KillSwitchService:
         hard_block_v6: set[str] = set()
         failures: list[str] = []
         resource_state: dict[str, Any] = {}
+        preset_sync_report: dict[str, Any] | None = None
+
+        if auto_sync_openai_countries and config is None:
+            try:
+                preset_sync_report = self.sync_openai_supported_countries(
+                    preset_name="chatgpt",
+                    force=False,
+                    min_interval_hours=sync_min_interval_hours,
+                    apply_resource=True,
+                    run_apply=False,
+                )
+                if preset_sync_report.get("resource_updated"):
+                    current = storage.load_config()
+                    current.vpn_interface = validate_ifname(current.vpn_interface)
+            except CLIError as exc:
+                failures.append(f"chatgpt_openai_country_sync: {exc}")
 
         for resource in current.resources:
             if not resource.enabled:
@@ -873,6 +1055,7 @@ class KillSwitchService:
             "resource_state": resource_state,
             "failures": failures,
             "events": transition_events,
+            "preset_sync_report": preset_sync_report,
             "counts": {
                 "vpn_only_v4": len(vpn_only_v4),
                 "vpn_only_v6": len(vpn_only_v6),

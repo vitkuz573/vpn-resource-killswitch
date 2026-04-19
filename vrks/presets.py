@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,14 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _atomic_write_json(path: Path, payload: dict[str, Any], *, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{os.urandom(4).hex()}")
+    temp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temp_path.chmod(mode)
+    temp_path.replace(path)
+
+
 def _normalize_preset(raw: dict[str, Any]) -> Preset:
     name = normalize_resource_name(str(raw["name"]))
     description = str(raw.get("description") or "").strip() or "No description"
@@ -65,6 +74,84 @@ def _presets_from_file(path: Path) -> dict[str, Preset]:
         preset = _normalize_preset(item)
         result[preset.name] = preset
     return result
+
+
+def _sanitize_raw_preset(raw: dict[str, Any]) -> dict[str, Any]:
+    preset = _normalize_preset(raw)
+    payload: dict[str, Any] = {
+        "name": preset.name,
+        "description": preset.description,
+        "domains": preset.domains,
+        "policy": {
+            "required_country": preset.policy.get("required_country"),
+            "required_server": preset.policy.get("required_server"),
+            "allowed_countries": preset.policy.get("allowed_countries") or [],
+            "blocked_countries": preset.policy.get("blocked_countries") or [],
+            "blocked_context_keywords": preset.policy.get("blocked_context_keywords") or [],
+        },
+    }
+    meta = raw.get("meta")
+    if isinstance(meta, dict):
+        payload["meta"] = meta
+    return payload
+
+
+def load_user_presets_data() -> dict[str, Any]:
+    if not USER_PRESETS_PATH.exists():
+        return {"version": 1, "presets": []}
+    data = _load_json(USER_PRESETS_PATH)
+    items = data.get("presets")
+    if not isinstance(items, list):
+        raise CLIError(f"Invalid presets format in {USER_PRESETS_PATH}: 'presets' array required.")
+    return data
+
+
+def get_user_preset_raw(name: str) -> dict[str, Any] | None:
+    target = normalize_resource_name(name)
+    payload = load_user_presets_data()
+    for item in payload.get("presets", []):
+        if not isinstance(item, dict):
+            continue
+        raw_name = item.get("name")
+        if raw_name is None:
+            continue
+        try:
+            normalized = normalize_resource_name(str(raw_name))
+        except CLIError:
+            continue
+        if normalized == target:
+            return item
+    return None
+
+
+def upsert_user_preset(raw: dict[str, Any]) -> Preset:
+    sanitized = _sanitize_raw_preset(raw)
+    preset = _normalize_preset(sanitized)
+
+    payload = load_user_presets_data()
+    items: list[dict[str, Any]] = []
+    replaced = False
+    for item in payload.get("presets", []):
+        if not isinstance(item, dict):
+            continue
+        raw_name = item.get("name")
+        if raw_name is None:
+            continue
+        try:
+            normalized = normalize_resource_name(str(raw_name))
+        except CLIError:
+            continue
+        if normalized == preset.name:
+            items.append(sanitized)
+            replaced = True
+            continue
+        items.append(item)
+    if not replaced:
+        items.append(sanitized)
+
+    out = {"version": int(payload.get("version", 1) or 1), "presets": items}
+    _atomic_write_json(USER_PRESETS_PATH, out)
+    return preset
 
 
 def load_presets() -> dict[str, Preset]:

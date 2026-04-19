@@ -113,6 +113,19 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap_p.set_defaults(autodiscover=True)
 
     apply_p = sub.add_parser("apply", help="Refresh nftables rules from current config.")
+    apply_p.add_argument(
+        "--no-auto-sync-openai-countries",
+        dest="auto_sync_openai_countries",
+        action="store_false",
+        help="Skip periodic sync of OpenAI supported countries for the chatgpt preset.",
+    )
+    apply_p.add_argument(
+        "--sync-min-hours",
+        type=int,
+        default=24,
+        help="Minimum hours between automatic OpenAI country sync attempts.",
+    )
+    apply_p.set_defaults(auto_sync_openai_countries=True)
 
     status_p = sub.add_parser("status", help="Show config/runtime state.")
     status_p.add_argument("--json", action="store_true", help="Output raw JSON.")
@@ -130,6 +143,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only update config, do not run apply.",
     )
     preset_apply_p.set_defaults(run_apply=True)
+
+    preset_sync_openai_p = sub.add_parser(
+        "preset-sync-openai-countries",
+        help="Sync preset allow-country policy from OpenAI official supported-countries list.",
+    )
+    preset_sync_openai_p.add_argument("--name", default="chatgpt", help="Preset name (default: chatgpt).")
+    preset_sync_openai_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore sync interval and force immediate refresh.",
+    )
+    preset_sync_openai_p.add_argument(
+        "--min-hours",
+        type=int,
+        default=24,
+        help="Minimum hours between sync runs when not forced.",
+    )
+    preset_sync_openai_p.add_argument(
+        "--no-apply-resource",
+        dest="apply_resource",
+        action="store_false",
+        help="Do not update matching resource policy in config.",
+    )
+    preset_sync_openai_p.add_argument(
+        "--run-apply",
+        action="store_true",
+        help="Run vrks apply after sync.",
+    )
+    preset_sync_openai_p.add_argument("--timeout", type=int, default=20, help="Source fetch timeout in seconds.")
+    preset_sync_openai_p.add_argument("--json", action="store_true", help="Output JSON.")
+    preset_sync_openai_p.set_defaults(apply_resource=True)
 
     discover_p = sub.add_parser("discover", help="Discover domains by crawling resource or preset.")
     discover_target = discover_p.add_mutually_exclusive_group(required=True)
@@ -436,9 +480,25 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if verify["passed"] else 1
 
         if args.command == "apply":
-            report = svc.apply()
+            report = svc.apply(
+                auto_sync_openai_countries=args.auto_sync_openai_countries,
+                sync_min_interval_hours=args.sync_min_hours,
+            )
             print("Rules refreshed.")
             print(f"Counts: {report['counts']}")
+            if report.get("preset_sync_report") is not None:
+                sync = report["preset_sync_report"]
+                if sync.get("skipped"):
+                    print(
+                        "Preset sync (OpenAI countries): "
+                        f"skipped ({sync.get('skip_reason', 'unknown')})"
+                    )
+                else:
+                    print(
+                        "Preset sync (OpenAI countries): "
+                        f"changed={str(sync.get('preset_changed', False)).lower()} "
+                        f"codes={sync.get('new_allowed_count', 0)}"
+                    )
             if report["failures"]:
                 print("Warnings:")
                 for failure in report["failures"]:
@@ -543,6 +603,39 @@ def main(argv: list[str] | None = None) -> int:
                             f"  - [{event.get('severity', 'normal')}] "
                             f"{event.get('title', 'VRKS event')}: {event.get('message', '')}"
                         )
+            return 0
+
+        if args.command == "preset-sync-openai-countries":
+            report = svc.sync_openai_supported_countries(
+                preset_name=args.name,
+                force=args.force,
+                min_interval_hours=args.min_hours,
+                apply_resource=args.apply_resource,
+                run_apply=args.run_apply,
+                timeout=args.timeout,
+            )
+            if args.json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(f"Preset: {report['preset']}")
+                if report.get("skipped"):
+                    print(
+                        f"Sync: skipped ({report.get('skip_reason', 'unknown')}) "
+                        f"next={report.get('next_sync_at', '-')}"
+                    )
+                else:
+                    print(
+                        f"Sync: changed={str(report['preset_changed']).lower()} "
+                        f"added={len(report['added_countries'])} "
+                        f"removed={len(report['removed_countries'])} "
+                        f"codes={report['new_allowed_count']}"
+                    )
+                    print(
+                        f"Resource updated: {str(report['resource_updated']).lower()} "
+                        f"resource found: {str(report['resource_found']).lower()}"
+                    )
+                    print(f"Source: {report['source_url']}")
+                print(f"Run apply: {str(report.get('applied', False)).lower()}")
             return 0
 
         if args.command == "discover":

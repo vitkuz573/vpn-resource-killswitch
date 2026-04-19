@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.error import URLError
@@ -13,7 +14,12 @@ from vrks.errors import CLIError
 from vrks.firewall import build_nft_rules
 from vrks.models import AppConfig, ResourcePolicy, ResourceProfile, VpnContext
 from vrks.network import normalize_domain, normalize_domains, resolve_domains
-from vrks.presets import get_preset, list_presets
+from vrks.openai_country_sync import (
+    OpenAISupportedCountriesSnapshot,
+    extract_openai_supported_country_names,
+    map_openai_country_names_to_codes,
+)
+from vrks.presets import get_preset, list_presets, upsert_user_preset
 from vrks.service import KillSwitchService, _build_transition_events, _policy_match
 from vrks import storage
 from vrks.traffic import extract_domains_from_capture, filter_domains, parse_command
@@ -169,6 +175,30 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(report.unresolved_domains, ["a.example.com"])
 
 
+class OpenAICountrySyncTests(unittest.TestCase):
+    def test_extract_openai_supported_country_names(self) -> None:
+        html = """
+        <html><body>
+          <article id="mainContent">
+            <ul>
+              <li>United States of America</li>
+              <li>Germany</li>
+              <li>Germany</li>
+            </ul>
+          </article>
+        </body></html>
+        """
+        self.assertEqual(
+            extract_openai_supported_country_names(html),
+            ["United States of America", "Germany"],
+        )
+
+    def test_map_openai_country_names_to_codes_with_unmapped(self) -> None:
+        codes, unmapped = map_openai_country_names_to_codes(["United States of America", "Narnia"])
+        self.assertEqual(codes, ["US"])
+        self.assertEqual(unmapped, ["Narnia"])
+
+
 class RuntimeDiscoveryTests(unittest.TestCase):
     def test_extract_domains_from_capture_normalizes_and_ignores_local(self) -> None:
         capture = "\n".join(
@@ -300,13 +330,95 @@ class NotificationEventTests(unittest.TestCase):
 
 
 class PresetTests(unittest.TestCase):
-    def test_preset_catalog_has_antigravity(self) -> None:
+    def test_preset_catalog_has_builtins(self) -> None:
         names = [item.name for item in list_presets()]
         self.assertIn("antigravity", names)
+        self.assertIn("chatgpt", names)
 
-    def test_get_preset_contains_domains(self) -> None:
+    def test_get_preset_antigravity_contains_domains(self) -> None:
         preset = get_preset("antigravity")
         self.assertTrue(len(preset.domains) >= 2)
+
+    def test_get_preset_chatgpt_contains_expected_domains(self) -> None:
+        preset = get_preset("chatgpt")
+        self.assertIn("chatgpt.com", preset.domains)
+        self.assertIn("api.openai.com", preset.domains)
+        self.assertIn("developers.openai.com", preset.domains)
+        self.assertIn("status.openai.com", preset.domains)
+        self.assertIn("US", preset.policy["allowed_countries"])
+        self.assertNotIn("RU", preset.policy["allowed_countries"])
+        self.assertGreaterEqual(len(preset.policy["allowed_countries"]), 150)
+
+
+class PresetOpenAISyncServiceTests(unittest.TestCase):
+    @mock.patch("vrks.service.ensure_root")
+    @mock.patch("vrks.service.fetch_openai_supported_country_snapshot")
+    def test_sync_openai_supported_countries_updates_user_preset(
+        self, mocked_fetch: mock.Mock, mocked_root: mock.Mock
+    ) -> None:
+        _ = mocked_root
+        with TemporaryDirectory() as tmp:
+            user_presets = Path(tmp) / "presets.json"
+            with mock.patch("vrks.presets.USER_PRESETS_PATH", user_presets):
+                mocked_fetch.return_value = OpenAISupportedCountriesSnapshot(
+                    source_url="https://developers.openai.com/api/docs/supported-countries",
+                    fetched_at="2026-04-19T12:00:00+00:00",
+                    html_sha256="abc123",
+                    country_names=["United States of America", "Germany"],
+                    country_codes=["US", "DE"],
+                )
+                report = KillSwitchService().sync_openai_supported_countries(
+                    preset_name="chatgpt",
+                    force=True,
+                    min_interval_hours=24,
+                    apply_resource=False,
+                    run_apply=False,
+                    timeout=10,
+                )
+                self.assertFalse(report["skipped"])
+                self.assertEqual(report["new_allowed_count"], 2)
+                self.assertTrue(report["preset_changed"])
+                self.assertEqual(report["added_countries"], [])
+                self.assertGreater(len(report["removed_countries"]), 10)
+
+                preset = get_preset("chatgpt")
+                self.assertEqual(preset.policy["allowed_countries"], ["DE", "US"])
+
+    @mock.patch("vrks.service.ensure_root")
+    @mock.patch("vrks.service.fetch_openai_supported_country_snapshot")
+    def test_sync_openai_supported_countries_respects_interval(
+        self, mocked_fetch: mock.Mock, mocked_root: mock.Mock
+    ) -> None:
+        _ = mocked_root
+        with TemporaryDirectory() as tmp:
+            user_presets = Path(tmp) / "presets.json"
+            with mock.patch("vrks.presets.USER_PRESETS_PATH", user_presets):
+                preset = get_preset("chatgpt")
+                upsert_user_preset(
+                    {
+                        "name": "chatgpt",
+                        "description": preset.description,
+                        "domains": preset.domains,
+                        "policy": preset.policy,
+                        "meta": {
+                            "openai_country_sync": {
+                                "last_synced_at": datetime.now(UTC).isoformat(),
+                            }
+                        },
+                    }
+                )
+
+                report = KillSwitchService().sync_openai_supported_countries(
+                    preset_name="chatgpt",
+                    force=False,
+                    min_interval_hours=24,
+                    apply_resource=False,
+                    run_apply=False,
+                    timeout=10,
+                )
+                self.assertTrue(report["skipped"])
+                self.assertEqual(report["skip_reason"], "interval_not_elapsed")
+                mocked_fetch.assert_not_called()
 
 
 class AccessCheckTests(unittest.TestCase):

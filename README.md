@@ -136,11 +136,15 @@ Notes:
 
 ## Presets
 
-`antigravity` ships as built-in preset (data file, not hardcoded logic).
+Built-in presets are shipped as data (not hardcoded logic), including:
+- `antigravity`
+- `chatgpt`
 
 ```bash
 sudo python3 vrks.py preset-list
 sudo python3 vrks.py preset-apply --name antigravity --replace
+sudo python3 vrks.py preset-apply --name chatgpt --replace
+sudo python3 vrks.py preset-sync-openai-countries --name chatgpt --run-apply
 ```
 
 Default preset catalog:
@@ -150,6 +154,29 @@ Optional override catalog:
 - `/etc/vpn-resource-killswitch/presets.json`
 
 User presets override built-ins by preset name.
+
+### OpenAI Country Auto-Sync
+
+`chatgpt` preset can auto-refresh `allowed_countries` from OpenAI official list:
+
+```bash
+# one-shot manual sync
+sudo python3 vrks.py preset-sync-openai-countries --name chatgpt --run-apply
+
+# force sync ignoring interval
+sudo python3 vrks.py preset-sync-openai-countries --name chatgpt --force --run-apply
+```
+
+`vrks apply` now runs periodic background sync (default interval: 24h):
+
+```bash
+sudo python3 vrks.py apply
+sudo python3 vrks.py apply --no-auto-sync-openai-countries
+sudo python3 vrks.py apply --sync-min-hours 12
+```
+
+Source:
+- `https://developers.openai.com/api/docs/supported-countries`
 
 ## Autodiscovery / Self-Heal
 
@@ -232,6 +259,7 @@ Main endpoints:
 - `POST /v1/bootstrap`
 - `GET /v1/presets`
 - `POST /v1/presets/{name}/apply`
+- `POST /v1/presets/{name}/sync-openai-countries`
 - `POST /v1/discover`
 - `POST /v1/resources/{name}/autofill`
 - `POST /v1/runtime/discover`

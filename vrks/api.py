@@ -47,6 +47,14 @@ class PresetApplyRequest(BaseModel):
     run_apply: bool = True
 
 
+class PresetOpenAICountrySyncRequest(BaseModel):
+    force: bool = False
+    min_interval_hours: int = Field(default=24, ge=0, le=24 * 30)
+    apply_resource: bool = True
+    run_apply: bool = False
+    timeout: int = Field(default=20, ge=1, le=120)
+
+
 class BootstrapRequest(BaseModel):
     preset_name: str
     vpn_interface: str | None = None
@@ -146,7 +154,7 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
     app = FastAPI(
         title="VPN Resource Kill-Switch API",
         description="REST API for managing VPN resource kill-switch policies and checks.",
-        version="1.5.0",
+        version="1.6.0",
     )
 
     def _run(handler):
@@ -200,6 +208,19 @@ def create_app(service: KillSwitchService | None = None) -> FastAPI:
     @app.post("/v1/presets/{name}/apply")
     def apply_preset(name: str, payload: PresetApplyRequest) -> dict[str, Any]:
         return _run(lambda: svc.apply_preset(name=name, replace=payload.replace, run_apply=payload.run_apply))
+
+    @app.post("/v1/presets/{name}/sync-openai-countries")
+    def sync_openai_countries(name: str, payload: PresetOpenAICountrySyncRequest) -> dict[str, Any]:
+        return _run(
+            lambda: svc.sync_openai_supported_countries(
+                preset_name=name,
+                force=payload.force,
+                min_interval_hours=payload.min_interval_hours,
+                apply_resource=payload.apply_resource,
+                run_apply=payload.run_apply,
+                timeout=payload.timeout,
+            )
+        )
 
     @app.post("/v1/discover")
     def discover(payload: DiscoverRequest) -> dict[str, Any]:
